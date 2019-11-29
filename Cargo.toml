@@ -1,0 +1,26 @@
+[package]
+name = "md_ui"
+version = "0.1.0"
+authors = ["Eric <eric_russo>"]
+edition = "2018"
+
+[lib]
+name = "md_ui"
+
+[dependencies]
+gl = "0.13.0"
+nalgebra-glm = "0.4.2"
+rand = "0.7.1"
+num-traits = "0.2.8"
+num-derive = "0.2"
+freetype-rs = "0.22.0"
+ropey = "1.1.0"
+newtype_derive = "0.1.6"
+macro-attr = "0.2.0" 
+bitflags = "1.2.1"
+
+md_ui_derive = { path = "./md_ui_derive" }
+
+[dependencies.sdl2]
+version = "0.32.2"
+features = ["bundled", "static-link"]
