@@ -124,6 +124,38 @@ impl WidgetList {
     }
 }
 
+pub struct WidgetListBuilder<'a> {
+    wl: WidgetList,
+    ctx: &'a DrawCtx
+}
+
+impl<'a> WidgetListBuilder<'a> {
+    pub fn new(orientation: Orientation, spacing: u32, ctx: &'a DrawCtx) -> Self {
+        WidgetListBuilder { wl: WidgetList::new(orientation, spacing), ctx }
+    }
+    pub fn get(self) -> WidgetList {
+        self.wl
+    }
+    pub fn get_widget(self) -> Box<dyn Widget> {
+        Box::new(self.wl)
+    }
+}
+
+impl<'a> std::ops::Add<Box<dyn Widget>> for WidgetListBuilder<'a> {
+    type Output = Self;
+    fn add(self, w: Box<dyn Widget>) -> Self {
+        let mut wl = self.wl;
+        wl.add(w, self.ctx);
+        WidgetListBuilder { wl, ctx: self.ctx }
+    }
+}
+
+impl<'a> std::ops::AddAssign<Box<dyn Widget>> for WidgetListBuilder<'a> {
+    fn add_assign(&mut self, w: Box<dyn Widget>) {
+        self.wl.add(w, self.ctx);
+    }
+}
+
 impl Widget for WidgetList {
     fn measure(&self, _: &DrawCtx) -> Point {
         self.size
@@ -206,6 +238,13 @@ impl Widget for WidgetList {
         self.size = size;
         size
     }
+}
+
+pub fn label_pair(text: &'static str, second: Box<dyn Widget>, ctx: &DrawCtx) -> Box<dyn Widget> {
+    let wlb = WidgetListBuilder::new(Orientation::Horizontal, 10, ctx)
+        + Box::new(Label::new(text, None, None, None, TextParams::new()))
+        + second;
+    wlb.get_widget()
 }
 
 pub struct Label {

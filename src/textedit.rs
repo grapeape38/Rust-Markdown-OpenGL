@@ -4,9 +4,9 @@ extern crate sdl2;
 use ropey::Rope;
 use std::time::{SystemTime};
 use sdl2::mouse::SystemCursor;
-use crate::primitives::{Point, RotateRect, DrawCtx, rgb_to_f32};
+use crate::primitives::{Point, RotateRect, DrawCtx, rgb_to_f32, Rect, Radians};
 use crate::render_text::{RenderText, TextParams};
-use crate::interface::{EventCtx, AppState, HandleKey, CallbackFn};
+use crate::interface::{EventCtx, AppState, HandleKey};
 use crate::widgets::{Widget, WidgetResponse, WidgetStatus, just_status};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -244,7 +244,14 @@ pub struct TextBox {
 }
 
 impl TextBox {
-    pub fn new(rect: RotateRect) -> Self {
+    pub fn new(size: Point) -> Self {
+        TextBox {
+            text_edit: Rc::new(RefCell::new(TextEdit::new(size.x))),
+            select_time: None,
+            rect: RotateRect::from_rect(Rect{ c1: Point::origin(), c2: size }, Radians(0.))
+        }
+    }
+    pub fn new_rotated(rect: RotateRect) -> Self {
         TextBox {
             text_edit: Rc::new(RefCell::new(TextEdit::new(rect.size.x))),
             select_time: None,

@@ -411,7 +411,7 @@ impl AppState {
             cb(self);
         }
     }
-    pub fn handle_mouse_event(&mut self, ev: &Event, kmod: &Mod) {
+    pub fn handle_mouse_event(&mut self, ev: &Event, _: &Mod) {
         let mut resp: Option<WidgetResponse> = None;
         match *ev {
             Event::MouseButtonDown { mouse_btn, x, y, .. } => {
@@ -426,15 +426,6 @@ impl AppState {
                     if resp.is_none() {
                         resp = self.interface.deselect();
                     }
-                    /*else {
-                        let clear_select = (*kmod & Mod::LCTRLMOD) == Mod::NOMOD;
-                        if self.hover_item != HoverItem::HoverNone {
-                            self.handle_hover_click(&pt, clear_select, &mut use_cursor);
-                        }
-                        else {
-                            self.handle_select(&pt, clear_select, &mut use_cursor);
-                        }
-                    }*/
                     self.cursors.get(&use_cursor).set();
                 }
             } 
@@ -454,12 +445,6 @@ impl AppState {
                     cursor: &mut use_cursor
                 };
                 resp = self.interface.hover(&pt, &mut event_ctx);
-                /*if let DragMode::DragNone = self.drag_mode {
-                    self.handle_hover(&pt, &mut use_cursor);
-                }
-                else {
-                    self.handle_drag(&pt, &mut use_cursor);
-                }*/
                 self.cursors.get(&use_cursor).set();
             }
             _ => {}
@@ -520,26 +505,6 @@ impl AppState {
             _ => {}
         }
     }
-    /*fn draw_shape_select_boxes(&self) {
-        for r in self.selection.values() {
-            r.draw(&self.draw_ctx);
-        }
-        for l in self.line_select.values() {
-            l.draw(&self.draw_ctx);
-        }
-    }
-    fn draw_text_boxes(&self) {
-        for (id, tb) in self.text_boxes.iter() {
-            let select_time = match self.key_mode {
-                KeyboardMode::TextEdit(edit_id, select_time) => {
-                    if edit_id == *id { Some(select_time) } else { None }
-                }
-                _ => None
-            };
-            let rect = self.draw_list.get(&id).unwrap().rect();
-            tb.draw(&rect, select_time, &self.draw_ctx);
-        }
-    }*/
     pub fn render(&mut self) {
         if self.needs_draw {
             unsafe { gl::Clear(gl::COLOR_BUFFER_BIT); }
@@ -549,33 +514,61 @@ impl AppState {
         }
     }
 }
+/* SPEC
+* Symbol: AMD
+* Strategy:
+* Date: 11/26/2019
+* Volume: Yes|No
+* Gap: Yes|No
+* Range: Yes|No
+* Level: LEVEL_E Extension
+* Pattern: Pennant
 
+Values
+Strategy:
+   1. MeanReversion Strategy
+   2. Trend
+   3. LEVEL_E Extension Pivot Re-Entry
+   4. LEVEL_D Pivot Entry
+
+Level:
+    LEVEL_F
+    LEVEL_G
+    LEVEL_A
+    LEVEL_B
+    LEVEL_C
+    LEVEL_D
+    LEVEL_E
+ */
 pub fn new_form(ctx: &DrawCtx) -> WidgetList {
-    let mut form = WidgetList::new(Orientation::Vertical, 10);
-    let label = Label::new("This is a fun label", None, None, None, TextParams::new());
-    let dd1 = DropDown::new(
-        vec!["Drop Down Choice 1", "DD2", "Threes a crowd"],
-        ctx
-    );
-
-    let mut row_1 = WidgetList::new(Orientation::Horizontal, 5);
-    row_1.add(Box::new(label), ctx);
-    row_1.add(Box::new(dd1), ctx);
-
-    let mut text_row = WidgetList::new(Orientation::Horizontal, 5);
-    let text_label = Label::new("Test Text Entry: ", None, None, None, TextParams::new());
-    let text_entry_size = ctx.render_text.measure("Enough room to comfortably type", 1.0); 
-    let text_entry = TextBox::new(RotateRect::from_rect(Rect::new(Point::origin(), text_entry_size), Radians(0.)));
-    text_row.add(Box::new(text_label), ctx);
-    text_row.add(Box::new(text_entry), ctx);
-
+    let mut form = WidgetListBuilder::new(Orientation::Vertical, 10, ctx);
+    form += label_pair("Symbol: ", Box::new(TextBox::new(ctx.render_text.measure("AMD", 1.))), ctx);
+    form += label_pair("Strategy: ", Box::new(DropDown::new(
+        vec![
+            "MeanReversion Strategy",
+            "Trend",
+            "LEVEL_E Extension Pivot Re-Entry",
+            "LEVEL_D Pivot Entry"
+        ], ctx)), ctx);
+    form += label_pair("Volume: ", Box::new(DropDown::new(vec![ "Yes", "No"], ctx)), ctx);
+    form += label_pair("Gap: ", Box::new(DropDown::new(vec![ "Yes", "No"], ctx)), ctx);
+    form += label_pair("Range: ", Box::new(DropDown::new(vec![ "Yes", "No"], ctx)), ctx);
+    form += label_pair("Level: ", Box::new(DropDown::new(
+        vec![
+            "LEVEL_F",
+            "LEVEL_G",
+            "LEVEL_A",
+            "LEVEL_B",
+            "LEVEL_C",
+            "LEVEL_D",
+            "LEVEL_E",
+        ], ctx)), ctx);
+    form += label_pair("Pattern: ", Box::new(DropDown::new(
+        vec![ "Triangle", ], ctx)), ctx);
     let border = Border::new(Point::new(5., 5.), rgb_to_f32(0, 0, 0));
-    let row_2 = Button::new("Submit", TextParams::new(), border.clone(), rgb_to_f32(0, 255, 255), just_status(WidgetStatus::FINE), ctx);
-
-    form.add(Box::new(row_1), ctx);
-    form.add(Box::new(text_row), ctx);
-    form.add(Box::new(row_2), ctx);
-    form
+    let submit = Button::new("Submit", TextParams::new(), border.clone(), rgb_to_f32(0, 255, 255), just_status(WidgetStatus::FINE), ctx);
+    form += Box::new(submit);
+    form.get()
 }
 
 pub struct EventCtx<'a> {
