@@ -1,4 +1,5 @@
 extern crate sdl2;
+extern crate chrono;
 
 use std::collections::{HashMap};
 use sdl2::event::Event;
@@ -6,6 +7,8 @@ use sdl2::keyboard::{Keycode, Mod};
 use sdl2::mouse::{Cursor, SystemCursor};
 use sdl2::video::Window;
 use std::time::SystemTime;
+use std::fs::File;
+use std::io::{Write, Error};
 use crate::primitives::*;
 //use crate::primitives::ShapeProps as Shape;
 use crate::textedit::{TextBox, get_char_from_keycode, get_dir_from_keycode};
@@ -14,6 +17,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 //use crate::hexcolor::HexColor;
 use crate::widgets::*;
+use chrono::Datelike;
 
 pub struct CursorMap(HashMap<SystemCursor, Cursor>);
 impl CursorMap {
@@ -165,11 +169,11 @@ impl Widget for Interface {
     }
 }*/
 
-fn new_interface(ctx: &DrawCtx) -> WidgetList {
+/*fn new_interface(ctx: &DrawCtx) -> WidgetList {
     let mut wl = WidgetList::new(Orientation::Vertical, 5);
     wl.add(Box::new(new_form(ctx)), ctx);
     wl
-}
+}*/
 
 pub trait HandleKey {
     fn handle_key_down(&mut self, kc: &Keycode, rt: &EventCtx) -> Option<WidgetResponse>;
@@ -180,7 +184,7 @@ pub type HandleKeyItem = Rc<RefCell<dyn HandleKey>>;
 impl AppState {
     pub fn new(viewport: &Point, window: Window) -> AppState {
         let draw_ctx = DrawCtx::new(viewport);
-        let interface = new_interface(&draw_ctx);
+        let interface = new_form(&draw_ctx);
         AppState {
             app_mode: AppMode::ModeDefault,
             draw_ctx,
@@ -513,6 +517,20 @@ impl AppState {
             self.needs_draw = false;
         }
     }
+    pub fn write_to_file(&self, path: &str, buf: &Vec<u8>) -> Result<(), Error> {
+        let mut file = File::create(path)?;
+        file.write(buf)?;
+        Ok(())
+    }
+    pub fn serialize(&self) {
+        let mut buf: Vec<u8> = Vec::new();
+        self.interface.serialize(&mut buf);
+        let path = "test.md";
+        match self.write_to_file(path, &buf) {
+            Ok(()) => { println!("Wrote to file {}", path); }
+            Err(e) => { println!("Error writing to file {:?}", e); }
+        }
+    }
 }
 /* SPEC
 * Symbol: AMD
@@ -540,20 +558,22 @@ Level:
     LEVEL_D
     LEVEL_E
  */
+
 pub fn new_form(ctx: &DrawCtx) -> WidgetList {
     let mut form = WidgetListBuilder::new(Orientation::Vertical, 10, ctx);
-    form += label_pair("Symbol: ", Box::new(TextBox::new(ctx.render_text.measure("AMD", 1.))), ctx);
-    form += label_pair("Strategy: ", Box::new(DropDown::new(
+    form += label_pair("Symbol:", Box::new(TextBox::new(ctx.render_text.measure("AMDDDD", 1.0))), ctx);
+    form += label_pair("Strategy:", Box::new(DropDown::new(
         vec![
-            "MeanReversion Strategy",
+            "Mean Reversion Strategy",
             "Trend",
             "LEVEL_E Extension Pivot Re-Entry",
             "LEVEL_D Pivot Entry"
-        ], ctx)), ctx);
-    form += label_pair("Volume: ", Box::new(DropDown::new(vec![ "Yes", "No"], ctx)), ctx);
-    form += label_pair("Gap: ", Box::new(DropDown::new(vec![ "Yes", "No"], ctx)), ctx);
-    form += label_pair("Range: ", Box::new(DropDown::new(vec![ "Yes", "No"], ctx)), ctx);
-    form += label_pair("Level: ", Box::new(DropDown::new(
+        ], 0, ctx)), ctx);
+    form += Box::new(DateWidget::new(ctx));
+    form += label_pair("Volume:", Box::new(DropDown::new(vec![ "Yes", "No"], 0, ctx)), ctx);
+    form += label_pair("Gap:", Box::new(DropDown::new(vec![ "Yes", "No"], 0, ctx)), ctx);
+    form += label_pair("Range:", Box::new(DropDown::new(vec![ "Yes", "No"], 0, ctx)), ctx);
+    form += label_pair("Level:", Box::new(DropDown::new(
         vec![
             "LEVEL_F",
             "LEVEL_G",
@@ -562,11 +582,15 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetList {
             "LEVEL_C",
             "LEVEL_D",
             "LEVEL_E",
-        ], ctx)), ctx);
-    form += label_pair("Pattern: ", Box::new(DropDown::new(
-        vec![ "Triangle", ], ctx)), ctx);
+        ], 0, ctx)), ctx);
+    form += label_pair("Pattern:", Box::new(DropDown::new(
+        vec![ "Triangle", ], 0, ctx)), ctx);
+    form += label_pair("Portfolio:", Box::new(DropDown::new(
+        vec![ "A", "B"], 0, ctx)), ctx);
     let border = Border::new(Point::new(5., 5.), rgb_to_f32(0, 0, 0));
-    let submit = Button::new("Submit", TextParams::new(), border.clone(), rgb_to_f32(0, 255, 255), just_status(WidgetStatus::FINE), ctx);
+    let submit = Button::new("Submit", TextParams::new(), border.clone(), rgb_to_f32(0, 255, 255), 
+        just_cb(Rc::new(|app: &mut AppState| app.serialize())), ctx
+    );
     form += Box::new(submit);
     form.get()
 }

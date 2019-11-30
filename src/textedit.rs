@@ -31,41 +31,40 @@ pub enum TextCursorDirection {
 pub struct TextEdit {
     text_rope: Rope,
     top_line: usize,
-    line_width: f32,
+    size: Point,
     cursor: TextCursor,
     text_params: TextParams,
 }
 
 impl TextEdit {
-    fn new(line_width: f32) -> Self {
+    fn new(size: Point) -> Self {
         TextEdit {
             text_rope: Rope::new(),
             top_line: 0,
-            line_width,
+            size,
             cursor: TextCursor::new(),
-            text_params: TextParams::new().color(0,0,0).scale(0.7),
+            text_params: TextParams::new(),
         }
     }
     pub fn insert_char(&mut self, ch: char, rt: &RenderText) {
-        self.text_rope.insert_char(self.cursor.char_idx, ch);
-        self.cursor.char_idx += 1;
+        let scale = self.text_params.scale;
         let cursor_line = self.text_rope.char_to_line(self.cursor.char_idx);
         let line = self.text_rope.line(cursor_line);
+        let new_width = rt.char_size(ch, scale).x + rt.measure(line.as_str().unwrap(), scale).x;
+        if new_width > self.size.x && (1 + self.text_rope.len_lines()) as f32 * rt.line_height(scale) > self.size.y {
+            return;
+        }
         let cursor_pos = self.cursor.char_idx - self.text_rope.line_to_char(cursor_line);
-        if cursor_pos == line.len_chars() &&
-            rt.measure(line.as_str().unwrap(), self.text_params.scale).x > self.line_width 
-        {
-            if self.cursor.char_idx == self.text_rope.len_chars() {
-                self.text_rope.insert_char(self.cursor.char_idx-1, '\n');
-                self.cursor.char_idx += 1;
-            }
+        let insert_break = cursor_pos == line.len_chars() && new_width > self.size.x && self.cursor.char_idx == self.text_rope.len_chars();
+        self.text_rope.insert_char(self.cursor.char_idx, ch);
+        self.cursor.char_idx += 1;
+        if insert_break {
+            self.text_rope.insert_char(self.cursor.char_idx-1, '\n');
+            self.cursor.char_idx += 1;
         }
         if self.cursor.char_idx < self.text_rope.len_chars() {
             self.format_text(cursor_line, rt);
         }
-        /*if self.text_rope.len_lines() as f32 * rt.line_height(self.text_params.scale) > self.rect.size.y {
-            self.top_line += 1;
-        }*/
     }
     pub fn delete_char(&mut self, rt: &RenderText) {
         if self.text_rope.len_chars() == 0 {
@@ -143,7 +142,7 @@ impl TextEdit {
     }
     pub fn needs_format(&self, start_line: usize, rt: &RenderText) -> bool {
         let start_line_width = rt.measure(self.text_rope.line(start_line).as_str().unwrap(), self.text_params.scale).x;
-        if start_line_width > self.line_width {
+        if start_line_width > self.size.x {
             return true;
         }
         if start_line < self.text_rope.len_lines() - 1 {
@@ -151,7 +150,7 @@ impl TextEdit {
             if next_line.len_chars() > 0 {
                 let next_line_char = next_line.char(0);
                 let next_line_char_width = rt.char_size(next_line_char, self.text_params.scale).x;
-                return start_line_width + next_line_char_width <= self.line_width 
+                return start_line_width + next_line_char_width <= self.size.x
             }
         }
         false
@@ -164,7 +163,7 @@ impl TextEdit {
         let mut line_x = 0.;
         let mut line_breaks = Vec::new();
         for (i, c) in self.text_rope.slice(start_char..).chars().enumerate() {
-            let add_break = line_x + rt.char_size(c, self.text_params.scale).x > self.line_width;
+            let add_break = line_x + rt.char_size(c, self.text_params.scale).x > self.size.x;
             let was_break = c == '\n';
             if add_break {
                 line_x = 0.;
@@ -246,14 +245,14 @@ pub struct TextBox {
 impl TextBox {
     pub fn new(size: Point) -> Self {
         TextBox {
-            text_edit: Rc::new(RefCell::new(TextEdit::new(size.x))),
+            text_edit: Rc::new(RefCell::new(TextEdit::new(size))),
             select_time: None,
             rect: RotateRect::from_rect(Rect{ c1: Point::origin(), c2: size }, Radians(0.))
         }
     }
     pub fn new_rotated(rect: RotateRect) -> Self {
         TextBox {
-            text_edit: Rc::new(RefCell::new(TextEdit::new(rect.size.x))),
+            text_edit: Rc::new(RefCell::new(TextEdit::new(rect.size))),
             select_time: None,
             rect
         }
@@ -273,6 +272,11 @@ impl Widget for TextBox {
     fn hover(&mut self, _: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
         *ctx.cursor = SystemCursor::IBeam;
         Some(just_status(WidgetStatus::FINE))
+    }
+    fn serialize(&self, buf: &mut Vec<u8>) {
+        let rope = &self.text_edit.borrow().text_rope;
+        let s = rope.slice(0..rope.len_chars()).as_str().unwrap();
+        buf.extend_from_slice(s.as_bytes())
     }
     fn click(&mut self, off: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
         {

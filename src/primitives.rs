@@ -871,6 +871,10 @@ impl DrawCtx {
         let rect = RotateRect::new(offset, Point::new(side, side), rot);
         DrawPolygon { prim: PrimType::Rect, fill, color, rect }.draw(self);
     }
+    pub fn draw_iso_tri(&self, center: Point, base: f32, height: f32, color: glm::Vec4, fill:bool, rot: Radians) {
+        let rect = RotateRect::new(Point::new(center.x - base / 2., center.y - height / 2.), Point::new(base, height), rot);
+        DrawPolygon { prim: PrimType::Triangle, fill, color, rect }.draw(self);
+    }
     #[allow(dead_code)]
     pub fn draw_line(&self, p1: Point, p2: Point, color: glm::Vec4, line_width: f32) {
         DrawLine { p1, p2, line_width, color }.draw(self);

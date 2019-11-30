@@ -116,15 +116,16 @@ impl TextParams {
     }
     pub fn get_uniforms(&self, text: &str, r: &RotateRect, rt: &RenderText, vp: &Point) -> TextUniforms
     {
-        let off = match self.align { 
-            TextAlign::Left => Point::new(0., rt.line_height(self.scale)),
+        let mut off = rt.char_offset(self.scale);
+        match self.align { 
+            TextAlign::Left => {},
             TextAlign::Center => {
                 let width = rt.measure(text, self.scale).x;
-                Point::new((r.size.x - width) / 2., rt.line_height(self.scale))
+                off.x += (r.size.x - width) / 2.
             } 
             TextAlign::Right => {
                 let width = rt.measure(text, self.scale).x;
-                Point::new(r.size.x - width, rt.line_height(self.scale))
+                off.x += r.size.x - width;
             }
         };
         self.trans.transform(
@@ -230,8 +231,14 @@ impl RenderText {
     pub fn has_char(&self, ch: char) -> bool {
         self.char_map.contains_key(&(ch as GLchar))
     }
+    fn char_offset(&self, scale: f32) -> Point {
+        let ch = &self.char_map[&('g' as i8)];
+        Point::new(
+            ch.bearing.x as f32 * scale,
+            ch.size.y as f32 * scale)
+    }
     pub fn line_height(&self, scale: f32) -> f32 {
-        self.char_map[&('a' as i8)].size.y as f32 * scale * 1.4
+        self.char_map[&('g' as i8)].size.y as f32 * 1.25 * scale
     }
     pub fn char_size(&self, ch: char, scale: f32) -> Point {
         self.char_map.get(&(ch as GLchar)).map(|ch| Point::new(scale * ch.size.x as f32, scale * ch.size.y as f32))

@@ -35,7 +35,7 @@ fn main() {
     let gl_attr = video_subsystem.gl_attr();
     let _gl_context = window.gl_create_context().unwrap();
     gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
-    gl_attr.set_context_version(4,5);
+    gl_attr.set_context_version(4,2);
     let _gl = gl::load_with(|s| video_subsystem.gl_get_proc_address(s) as *const std::os::raw::c_void);
 
     let bg_color = rgb_to_f32(128, 128, 128);
