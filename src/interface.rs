@@ -11,13 +11,11 @@ use std::fs::File;
 use std::io::{Write, Error};
 use crate::primitives::*;
 //use crate::primitives::ShapeProps as Shape;
-use crate::textedit::{TextBox, get_char_from_keycode, get_dir_from_keycode};
 use crate::render_text::{TextParams};
 use std::rc::Rc;
 use std::cell::RefCell;
 //use crate::hexcolor::HexColor;
 use crate::widgets::*;
-use chrono::Datelike;
 
 pub struct CursorMap(HashMap<SystemCursor, Cursor>);
 impl CursorMap {
@@ -98,12 +96,11 @@ enum AppMode {
 }
 
 pub struct AppState {
-    pub interface: WidgetList,
+    pub interface: WidgetGrid,
     pub key_item: Option<HandleKeyItem>,
     pub draw_ctx: DrawCtx,
     app_mode: AppMode,
     drag_mode: DragMode,
-    key_mode: KeyboardMode,
     hover_item: HoverItem,
     window: Window,
     cursors: CursorMap,
@@ -193,7 +190,6 @@ impl AppState {
             drag_mode: DragMode::DragNone,
             hover_item: HoverItem::HoverNone,
             key_item: None, 
-            key_mode: KeyboardMode::KeyboardNone,
             cursors: CursorMap::new(),
             needs_draw: true
         }
@@ -559,21 +555,21 @@ Level:
     LEVEL_E
  */
 
-pub fn new_form(ctx: &DrawCtx) -> WidgetList {
-    let mut form = WidgetListBuilder::new(Orientation::Vertical, 10, ctx);
-    form += label_pair("Symbol:", Box::new(TextBox::new(ctx.render_text.measure("AMDDDD", 1.0))), ctx);
-    form += label_pair("Strategy:", Box::new(DropDown::new(
+pub fn new_form(ctx: &DrawCtx) -> WidgetGrid {
+    let mut form = WidgetGrid::new(Point::new(10., 10.)).builder(ctx);
+    form += vec![new_label("Symbol:"), new_textbox(6, ctx)];
+    form += vec![new_label("Strategy:"), new_dropdown( 
         vec![
             "Mean Reversion Strategy",
             "Trend",
             "LEVEL_E Extension Pivot Re-Entry",
             "LEVEL_D Pivot Entry"
-        ], 0, ctx)), ctx);
-    form += Box::new(DateWidget::new(ctx));
-    form += label_pair("Volume:", Box::new(DropDown::new(vec![ "Yes", "No"], 0, ctx)), ctx);
-    form += label_pair("Gap:", Box::new(DropDown::new(vec![ "Yes", "No"], 0, ctx)), ctx);
-    form += label_pair("Range:", Box::new(DropDown::new(vec![ "Yes", "No"], 0, ctx)), ctx);
-    form += label_pair("Level:", Box::new(DropDown::new(
+        ], 0, ctx)];
+    form += vec![new_label("Date:"), Box::new(DateWidget::new(ctx))];
+    form += vec![new_label("Volume:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
+    form += vec![new_label("Gap:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
+    form += vec![new_label("Range:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
+    form += vec![new_label("Level:"), new_dropdown(
         vec![
             "LEVEL_F",
             "LEVEL_G",
@@ -582,16 +578,16 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetList {
             "LEVEL_C",
             "LEVEL_D",
             "LEVEL_E",
-        ], 0, ctx)), ctx);
-    form += label_pair("Pattern:", Box::new(DropDown::new(
-        vec![ "Triangle", ], 0, ctx)), ctx);
-    form += label_pair("Portfolio:", Box::new(DropDown::new(
-        vec![ "A", "B"], 0, ctx)), ctx);
+        ], 0, ctx)];
+    form += vec![new_label("Pattern:"), new_dropdown( 
+        vec![ "Triangle", ], 0, ctx)];
+    form += vec![new_label("Portfolio:"), new_dropdown( 
+        vec![ "A", "B"], 0, ctx)];
     let border = Border::new(Point::new(5., 5.), rgb_to_f32(0, 0, 0));
     let submit = Button::new("Submit", TextParams::new(), border.clone(), rgb_to_f32(0, 255, 255), 
         just_cb(Rc::new(|app: &mut AppState| app.serialize())), ctx
     );
-    form += Box::new(submit);
+    form += vec![Box::new(submit)];
     form.get()
 }
 

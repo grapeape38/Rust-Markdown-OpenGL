@@ -701,6 +701,11 @@ impl Rect {
     pub fn max_y(&self) -> &f32 {
         &self.c2.y
     }
+    pub fn set_offset(&mut self, off: &Point) {
+        let size = self.size();
+        self.c1 = *off;
+        self.c2 = *off + size;
+    }
 }
 
 impl InBounds for Rect {

@@ -3,12 +3,14 @@ extern crate bitflags;
 
 use crate::interface::{CallbackFn, EventCtx, AppState};
 use crate::render_text::{TextParams};
+use crate::textedit::{TextBox};
 use crate::primitives::{DrawCtx, Point, Rect, RotateRect, Radians, Border, BorderRect, InBounds, rgb_to_f32};
 use sdl2::mouse::SystemCursor;
 use nalgebra_glm as glm;
 use bitflags::bitflags;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::ops::{Deref, DerefMut};
 use chrono::Datelike;
 
 #[derive(Debug)]
@@ -74,7 +76,6 @@ pub struct WidgetList {
     pub orientation: Orientation,
     pub spacing: u32,
     pub size: Point,
-    delimiter: char,
     widgets: Vec<Box<dyn Widget>>,
     widget_rects: Vec<Rect>,
     needs_draw: RefCell<Vec<bool>>
@@ -83,12 +84,26 @@ pub struct WidgetList {
 impl WidgetList {
     pub fn new(orientation: Orientation, spacing: u32) -> Self {
         WidgetList { orientation, spacing, widgets: Vec::new(), widget_rects: Vec::new(), needs_draw: RefCell::new(Vec::new()), 
-                     size: Point::origin(), delimiter: ' '}
+                     size: Point::origin() }
     }
-    pub fn add(&mut self, w: Box<dyn Widget>, ctx: &DrawCtx) -> usize {
-        let m = w.measure(ctx);
+    
+    pub fn get_widget(&self, idx: usize) -> Option<&Box<dyn Widget>> {
+        self.widgets.get(idx)
+    }
+    pub fn get_widget_mut(&mut self, idx: usize) -> Option<&mut Box<dyn Widget>> {
+        self.widgets.get_mut(idx)
+    }
+    pub fn get_idx(&self, off_pt: &Point, ctx: &DrawCtx) -> Option<usize> {
+        self.widget_rects.iter().position(|r| r.in_bounds(off_pt, &ctx.viewport)) 
+    }
+}
+
+impl WidgetIterT for WidgetList {
+    type Child = Box<dyn Widget>;
+    fn add(&mut self, item: Self::Child, ctx: &DrawCtx) {
+        let m = item.measure(ctx);
         let spacing = if self.widgets.is_empty() { 0. } else { self.spacing as f32 };
-        self.widgets.push(w);
+        self.widgets.push(item);
         let mut c1 = Point::origin();
         match self.orientation {
             Orientation::Vertical => {
@@ -104,122 +119,11 @@ impl WidgetList {
         };
         self.needs_draw.borrow_mut().push(true);
         self.widget_rects.push(Rect {c1, c2: c1 + m});
-        self.widgets.len() - 1
     }
-    pub fn get_widget(&self, idx: usize) -> Option<&Box<dyn Widget>> {
-        self.widgets.get(idx)
-    }
-    pub fn get_widget_mut(&mut self, idx: usize) -> Option<&mut Box<dyn Widget>> {
-        self.widgets.get_mut(idx)
-    }
-    pub fn get_idx(&self, off_pt: &Point, ctx: &DrawCtx) -> Option<usize> {
-        self.widget_rects.iter().position(|r| r.in_bounds(off_pt, &ctx.viewport)) 
-    }
-    fn handle_response(&mut self, resp: Option<(usize, WidgetResponse)>) -> Option<WidgetResponse> {
-        if let Some((/*i*/_, (status, _))) = resp {
-            /*match status {
-                REDRAW | REMEASURE => {
-                    self.needs_draw.borrow_mut()[i] = true;
-                    self.needs_draw.borrow_mut() = vec![true; self.widgets.len()];
-                }
-                _ => {}
-            };*/
-            return Some(resp.unwrap().1)
-        }
-        None
-    }
-}
-
-pub struct WidgetListBuilder<'a> {
-    wl: WidgetList,
-    ctx: &'a DrawCtx
-}
-
-impl<'a> WidgetListBuilder<'a> {
-    pub fn new(orientation: Orientation, spacing: u32, ctx: &'a DrawCtx) -> Self {
-        WidgetListBuilder { wl: WidgetList::new(orientation, spacing), ctx }
-    }
-    pub fn get(self) -> WidgetList {
-        self.wl
-    }
-    pub fn get_widget(self) -> Box<dyn Widget> {
-        Box::new(self.wl)
-    }
-}
-
-impl<'a> std::ops::Add<Box<dyn Widget>> for WidgetListBuilder<'a> {
-    type Output = Self;
-    fn add(self, w: Box<dyn Widget>) -> Self {
-        let mut wl = self.wl;
-        wl.add(w, self.ctx);
-        WidgetListBuilder { wl, ctx: self.ctx }
-    }
-}
-
-impl<'a> std::ops::AddAssign<Box<dyn Widget>> for WidgetListBuilder<'a> {
-    fn add_assign(&mut self, w: Box<dyn Widget>) {
-        self.wl.add(w, self.ctx);
-    }
-}
-
-impl Widget for WidgetList {
-    fn measure(&self, _: &DrawCtx) -> Point {
+    fn measure_items(&self, _: &DrawCtx) -> Point {
         self.size
     }
-    fn draw(&self, offset: &Point, ctx: &DrawCtx) {
-        //let mut needs_draw = self.needs_draw.borrow_mut();
-        for (i, w) in self.widgets.iter().enumerate() {
-            //if needs_draw[i] {
-                w.draw(&(*offset + self.widget_rects[i].c1), ctx);
-             //   needs_draw[i] = false;
-           //}
-        }
-    }
-    fn deselect(&mut self) -> Option<WidgetResponse> {
-        self.widgets.iter_mut().fold(None, |resp, w| { 
-            match resp {
-                Some(r) => { 
-                    match w.deselect() {
-                        Some(ref r2) => Some(combine_response(&r, r2)),
-                        None => Some(r)
-                    }
-                }
-                None => { w.deselect() }
-            }
-        })
-    }
-    fn click(&mut self, off_pt: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
-        let mut resp: Option<(usize, WidgetResponse)> = None;
-        for (i, w) in self.widgets.iter_mut().enumerate() {
-            let rect = &self.widget_rects[i];
-            if rect.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
-                resp = w.click(&(*off_pt - rect.c1), ctx).map(|r| (i, r));
-                break;
-            }
-        }
-        if let Some((i, _)) = resp {
-            for (j, w) in self.widgets.iter_mut().enumerate() {
-                if i != j {
-                    if let Some(wr2) = w.deselect() {
-                        resp = Some((i, combine_response(&resp.unwrap().1, &wr2)));
-                    }
-                }
-            }
-        }
-        self.handle_response(resp)
-    }
-    fn hover(&mut self, off_pt: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
-        let mut resp: Option<(usize, WidgetResponse)> = None;
-        for (i, w) in self.widgets.iter_mut().enumerate() {
-            let rect = &self.widget_rects[i];
-            if rect.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
-                resp = w.hover(&(*off_pt - rect.c1), ctx).map(|r| (i, r));
-                break;
-            }
-        }
-        self.handle_response(resp)
-    }
-    fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
+    fn remeasure_items(&mut self, ctx: &DrawCtx) -> Point {
         let mut off = Point::origin();
         let mut size = Point::origin();
         for (i, w) in self.widgets.iter_mut().enumerate() {
@@ -243,7 +147,16 @@ impl Widget for WidgetList {
         self.size = size;
         size
     }
-    fn serialize(&self, buf: &mut Vec<u8>) {
+    fn widgets_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>)> + 'a> {
+        Box::new(self.widgets.iter_mut())
+    }
+    fn widgets_plus_rects<'a>(&'a self) -> Box<dyn Iterator<Item=(&'a Box<dyn Widget>, &'a Rect)> + 'a> {
+        Box::new(self.widgets.iter().zip(self.widget_rects.iter()))
+    }
+    fn widgets_plus_rects_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>, &'a mut Rect)> + 'a> {
+        Box::new(self.widgets.iter_mut().zip(self.widget_rects.iter_mut()))
+    }
+    fn serialize_items(&self, buf: &mut Vec<u8>) {
         match self.orientation {
             Orientation::Vertical => {
                 for w in &self.widgets {
@@ -263,33 +176,83 @@ impl Widget for WidgetList {
     }
 }
 
-/*impl WidgetIterT for WidgetList {
-    fn widgets_plus_rects<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>, &'a Rect)> + 'a> {
-        Box::new(self.widgets.iter_mut().zip(self.widget_rects.iter()))
+/*pub type WidgetChild<'a> = &'a Box<dyn Widget>; 
+pub type WidgetIter<'a> = Box<dyn Iterator<Item=WidgetChild<'a>> + 'a>;
+pub type WidgetIntoIter<'a> = Box<dyn IntoIterator<IntoIter=WidgetIter<'a>, Item=WidgetChild<'a>>>;
+
+pub type WidgetChildMut<'a> = &'a mut Box<dyn Widget>; 
+pub type WidgetIterMut<'a> = Box<dyn Iterator<Item=WidgetChildMut<'a>> + 'a>;
+pub type WidgetIntoIterMut<'a> = Box<dyn IntoIterator<IntoIter=WidgetIterMut<'a>, Item=WidgetChildMut<'a>>>;
+
+pub type WidgetChildRect<'a> = (WidgetChild<'a>, &'a Rect);
+pub type WidgetChildRectIter<'a> = Box<dyn Iterator<Item=WidgetChildRect<'a>> + 'a>;
+pub type WidgetChildRectIntoIter<'a> = Box<dyn IntoIterator<IntoIter=WidgetChildRectIter<'a>, Item=WidgetChildRect<'a>>>;
+
+pub type WidgetChildRectMut<'a> = (WidgetChildMut<'a>, &'a mut Rect);
+pub type WidgetChildRectIterMut<'a> = Box<dyn Iterator<Item=WidgetChildRect<'a>> + 'a>;
+pub type WidgetChildRectIntoIterMut<'a> = Box<dyn IntoIterator<IntoIter=WidgetChildRectIter<'a>, Item=WidgetChildRect<'a>>>;*/
+
+pub trait WidgetIterT {
+    type Child;
+    fn add(&mut self, item: Self::Child, ctx: &DrawCtx); 
+    fn widgets_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>)> + 'a>;
+    fn widgets_plus_rects<'a>(&'a self) -> Box<dyn Iterator<Item=(&'a Box<dyn Widget>, &'a Rect)> + 'a>;
+    fn widgets_plus_rects_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>, &'a mut Rect)> + 'a>;
+    fn measure_items(&self, ctx: &DrawCtx) -> Point;
+    fn remeasure_items(&mut self, ctx: &DrawCtx) -> Point;
+    fn serialize_items(&self, buf: &mut Vec<u8>);
+    fn click_self(&mut self, _: &Point, _: &mut EventCtx) -> Option<WidgetResponse> { None }
+    fn hover_self(&mut self, _: &Point, _: &mut EventCtx) -> Option<WidgetResponse> { None }
+    fn draw_self(&self, _: &Point, _: &DrawCtx) { }
+    fn builder<'a>(self, ctx: &'a DrawCtx) -> WidgetBuilder<'a, Self> where Self: std::marker::Sized {
+        WidgetBuilder::new(self, ctx)
     }
-}*/
+    fn handle_response(&mut self, resp: Option<(usize, WidgetResponse)>) -> Option<WidgetResponse> {
+        if let Some(_) = resp {
+            return Some(resp.unwrap().1)
+        }
+        None
+    }
+}
 
+pub struct WidgetBuilder<'a, T: WidgetIterT> {
+    w: T,
+    ctx: &'a DrawCtx
+}
 
-/*pub trait WidgetIterT {
-    fn widgets<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>)>>;
-    fn widgets_plus_rects<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>, &'a Rect)> + 'a>;
-    fn measure(&self, ctx: &DrawCtx) -> Point;
-    fn remeasure(&mut self, ctx: &DrawCtx) -> Point;
-    fn serialize(&self, buf: &mut Vec<u8>);
+impl<'a, T: WidgetIterT> WidgetBuilder<'a, T> {
+    pub fn new(w: T, ctx: &'a DrawCtx) -> Self {
+        Self { w, ctx }
+    }
+    pub fn get(self) -> T {
+        self.w
+    }
+}
+
+impl<'a, C, T: WidgetIterT<Child = C>> std::ops::Add<C> for WidgetBuilder<'a, T> {
+    type Output = Self;
+    fn add(self, c: C) -> Self {
+        let mut w= self.w;
+        w.add(c, self.ctx);
+        WidgetBuilder { w, ctx: self.ctx }
+    }
+}
+
+impl<'a, C, T: WidgetIterT<Child = C>> std::ops::AddAssign<C> for WidgetBuilder<'a, T> {
+    fn add_assign(&mut self, c: C) {
+        self.w.add(c, self.ctx);
+    }
 }
 
 impl<T: WidgetIterT> Widget for T {
     fn draw(&self, offset: &Point, ctx: &DrawCtx) {
-        //let mut needs_draw = self.needs_draw.borrow_mut();
+        self.draw_self(offset, ctx);
         for (w, r) in self.widgets_plus_rects() {
-            //if needs_draw[i] {
-                w.draw(&(*offset + r.c1), ctx);
-             //   needs_draw[i] = false;
-           //}
+            w.draw(&(*offset + r.c1), ctx);
         }
     }
     fn deselect(&mut self) -> Option<WidgetResponse> {
-        self.widgets().fold(None, |resp, w| { 
+        self.widgets_mut().fold(None, |resp, w| { 
             match resp {
                 Some(r) => { 
                     match w.deselect() {
@@ -302,15 +265,15 @@ impl<T: WidgetIterT> Widget for T {
         })
     }
     fn click(&mut self, off_pt: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
-        let mut resp: Option<(usize, WidgetResponse)> = None;
-        for (i, (w, r)) in self.widgets_plus_rects().enumerate() {
+        let mut resp = self.click_self(off_pt, ctx).map(|r| (0, r));
+        for (i, (w, r)) in self.widgets_plus_rects_mut().enumerate() {
             if r.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
                 resp = w.click(&(*off_pt - r.c1), ctx).map(|r| (i, r));
                 break;
             }
         }
         if let Some((i, _)) = resp {
-            for (j, w) in self.widgets().enumerate() {
+            for (j, w) in self.widgets_mut().enumerate() {
                 if i != j {
                     if let Some(wr2) = w.deselect() {
                         resp = Some((i, combine_response(&resp.unwrap().1, &wr2)));
@@ -321,15 +284,23 @@ impl<T: WidgetIterT> Widget for T {
         self.handle_response(resp)
     }
     fn hover(&mut self, off_pt: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
-        let mut resp: Option<(usize, WidgetResponse)> = None;
-        for (i, w) in self.widgets.iter_mut().enumerate() {
-            let rect = &self.widget_rects[i];
+        let mut resp = self.hover_self(off_pt, ctx).map(|r| (0, r));
+        for (i, (w, rect)) in self.widgets_plus_rects_mut().enumerate() {
             if rect.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
                 resp = w.hover(&(*off_pt - rect.c1), ctx).map(|r| (i, r));
                 break;
             }
         }
         self.handle_response(resp)
+    }
+    fn measure(&self, ctx: &DrawCtx) -> Point {
+        self.measure_items(ctx)
+    }
+    fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
+        self.remeasure_items(ctx)
+    }
+    fn serialize(&self, buf: &mut Vec<u8>) {
+        self.serialize_items(buf)
     }
 }
 
@@ -341,7 +312,14 @@ pub struct WidgetGrid {
 }
 
 impl WidgetGrid {
-    fn add(&mut self, new_row: Vec<Box<dyn Widget>>, ctx: &DrawCtx) {
+    pub fn new(spacing: Point) -> Self {
+        WidgetGrid { rows: Vec::new(), widget_rects: Vec::new(), spacing, size: Point::origin() }
+    }
+}
+
+impl WidgetIterT for WidgetGrid {
+    type Child = Vec<Box<dyn Widget>>;
+    fn add(&mut self, new_row: Self::Child, ctx: &DrawCtx) {
         let max_n_col = self.rows.iter().max_by_key(|r| r.len()).map(|r| r.len()).unwrap_or(0)
             .max(new_row.len());
         let mut max_col_widths: Vec<f32> = vec![0.; max_n_col];
@@ -372,13 +350,37 @@ impl WidgetGrid {
         }
         self.rows.push(new_row);
     }
-    fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
+    fn widgets_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>)> + 'a> {
+        Box::new(self.rows.iter_mut().flatten())
+    }
+    fn widgets_plus_rects<'a>(&'a self) -> Box<dyn Iterator<Item=(&'a Box<dyn Widget>, &'a Rect)> + 'a> {
+        Box::new(self.rows.iter().flatten().zip(self.widget_rects.iter().flatten()))
+    }
+    fn widgets_plus_rects_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>, &'a mut Rect)> + 'a> {
+        Box::new(self.rows.iter_mut().flatten().zip(self.widget_rects.iter_mut().flatten()))
+    }
+    fn serialize_items(&self, buf: &mut Vec<u8>) {
+        for r in &self.rows {
+            buf.push('*' as u8);
+            buf.push(' ' as u8);
+            for w in r  {
+                w.serialize(buf);
+                buf.push(' ' as u8);
+            }
+            buf.push('\n' as u8);
+        }
+    }
+    fn measure_items(&self, _: &DrawCtx) -> Point {
+        self.size
+    }
+    fn remeasure_items(&mut self, ctx: &DrawCtx) -> Point {
         if let Some(max_n_col) = self.rows.iter().max_by_key(|r| r.len()).map(|r| r.len()) {
             let mut max_col_widths: Vec<f32> = vec![0.; max_n_col];
             let mut row_heights: Vec<f32> = vec![0.; self.rows.len()];
             for (r, row) in self.rows.iter_mut().enumerate() {
                 for (c, widget) in row.iter_mut().enumerate() {
                     let m = widget.remeasure(ctx); 
+                    self.widget_rects[r][c] = Rect { c1: Point::origin(), c2: m };
                     max_col_widths[c] = max_col_widths[c].max(m.x);
                     row_heights[r] = row_heights[r].max(m.y);
                 }
@@ -398,15 +400,18 @@ impl WidgetGrid {
         }
         Point::origin()
     }
-}*/
+}
 
+pub fn new_label<T: Into<String>>(text: T) -> Box<dyn Widget> {
+    Box::new(Label::new(text, None, None, None, TextParams::new()))
+}
 
-pub fn label_pair(text: &'static str, second: Box<dyn Widget>, ctx: &DrawCtx) -> Box<dyn Widget> {
+/*pub fn label_pair<T: Into<String>>(text: T, second: Box<dyn Widget>, ctx: &DrawCtx) -> Box<dyn Widget> {
     let wlb = WidgetListBuilder::new(Orientation::Horizontal, 10, ctx)
-        + Box::new(Label::new(text, None, None, None, TextParams::new()))
+        + new_label(text)
         + second;
     wlb.get_widget()
-}
+}*/
 
 pub struct DateWidget {
     wl: WidgetList
@@ -414,7 +419,7 @@ pub struct DateWidget {
 
 impl DateWidget {
     pub fn new(ctx: &DrawCtx) -> Self {
-        let mut wlb = WidgetListBuilder::new(Orientation::Horizontal, 10, ctx);
+        let mut wlb = WidgetList::new(Orientation::Horizontal, 10).builder(ctx);
         let local = chrono::Local::now();
         let (day, mon, year) = (local.day(), local.month(), local.year());
         let n_days: [i8; 12] = [31, 28, 31, 30, 31, 30, 31, 30, 30, 31, 30, 31];
@@ -423,7 +428,6 @@ impl DateWidget {
         let mon_strs: Vec<String> = (1..13).map(|m| format!("{}", m)).collect();
         let year_strs: Vec<String> = (year-9..year+1).map(|y| format!("{}", y)).collect();
         let n_years = year_strs.len();
-        wlb += Box::new(Label::new("Date:", None, None, None, TextParams::new()));
         wlb += Box::new(DropDown::new(mon_strs, (mon - 1) as usize, ctx));
         wlb += Box::new(DropDown::new(day_strs, (day - 1) as usize, ctx));
         wlb += Box::new(DropDown::new(year_strs, n_years - 1, ctx));
@@ -452,12 +456,10 @@ impl Widget for DateWidget {
     }
     fn serialize(&self, buf: &mut Vec<u8>) {
         self.wl.get_widget(0).unwrap().serialize(buf);
-        buf.push(' ' as u8);
+        buf.push('/' as u8);
         self.wl.get_widget(1).unwrap().serialize(buf);
         buf.push('/' as u8);
         self.wl.get_widget(2).unwrap().serialize(buf);
-        buf.push('/' as u8);
-        self.wl.get_widget(3).unwrap().serialize(buf);
     }
 }
 
@@ -517,6 +519,15 @@ impl Widget for Label {
     fn serialize(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(self.text.as_bytes())
     }
+}
+
+pub fn new_textbox(num_chars: usize, ctx: &DrawCtx) -> Box<dyn Widget> {
+    Box::new(TextBox::new(ctx.render_text.measure(&String::from_utf8(
+        "A".as_bytes().iter().cycle().take(num_chars).map(|c| *c).collect()).unwrap(), 1.0)))
+}
+
+pub fn new_dropdown<'a, T: Into<String> + AsRef<str> + 'static>(values: Vec<T>, selected: usize, ctx: &DrawCtx) -> Box<dyn Widget> {
+    Box::new(DropDown::new(values, selected, ctx)) 
 }
 
 pub struct DropDown {
@@ -620,7 +631,8 @@ pub struct Button {
     text: &'static str,
     text_params: TextParams,
     pub onclick: WidgetResponse,
-    border_rect: BorderRect 
+    border_rect: BorderRect,
+    label: Option<Box<dyn Widget>>,
 }
 
 impl Button {
@@ -629,9 +641,49 @@ impl Button {
     {
         let size = ctx.render_text.measure(text, text_params.scale);
         let border_rect = BorderRect::new(size, fill_color, border);
-        Button { text, text_params, onclick, border_rect }
+        Button { text, text_params, onclick, border_rect, label: None }
     }
 }
+
+/*impl WidgetIterT for Button {
+    type Child = Label; 
+    fn add(&mut self, item: Self::Child, ctx: &DrawCtx) {
+        self.label = Box::new(item);
+    }
+    fn widgets_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>)> + 'a> {
+        Box::new(vec![self.label].iter_mut())
+        //self.deref_mut().widgets_mut()
+    }
+    fn widgets_plus_rects<'a>(&'a self) -> Box<dyn Iterator<Item=(&'a Box<dyn Widget>, &'a Rect)> + 'a> {
+        self.deref().widgets_plus_rects()
+    }
+    fn widgets_plus_rects_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item=(&'a mut Box<dyn Widget>, &'a mut Rect)> + 'a> {
+        self.deref_mut().widgets_plus_rects_mut()
+    }
+    fn measure_items(&self, _: &DrawCtx) -> Point {
+       self.border_rect.size + self.border_rect.border.width * Point::new(2., 2.)
+    }
+    fn hover_self(&mut self, pt: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
+        *ctx.cursor = SystemCursor::Hand;
+        Some(just_status(WidgetStatus::FINE))
+    }
+    fn draw_self(&self, offset: &Point, ctx: &DrawCtx) {
+        self.border_rect.draw(*offset, ctx);
+        let bw = self.border_rect.border.width;
+        let r = Rect {c1: *offset + bw, c2: *offset + bw + self.border_rect.size};
+        let rr = RotateRect::from_rect(r, Radians(0.));
+        ctx.render_text.draw(&self.text, &self.text_params, &rr, ctx);
+    }
+    fn click_self(&mut self, _: &Point, _: &mut EventCtx) -> Option<WidgetResponse> {
+        Some((self.onclick.0, Rc::clone(&self.onclick.1)))
+    }
+    fn remeasure_items(&mut self, ctx: &DrawCtx) -> Point {
+        self.deref_mut().remeasure_items(ctx)
+    }
+    fn serialize_items(&self, buf: &mut Vec<u8>) {
+        self.deref().serialize_items(buf)
+    }
+}*/
 impl Widget for Button {
     fn measure(&self, _: &DrawCtx) -> Point {
        self.border_rect.size + self.border_rect.border.width * Point::new(2., 2.)
@@ -651,3 +703,46 @@ impl Widget for Button {
         Some((self.onclick.0, Rc::clone(&self.onclick.1)))
     }
 }
+
+/*pub trait SerializeT { 
+    fn write_before(&self, _: &mut Vec<u8>) { }
+    fn write_self(&self, _: &mut Vec<u8>) { }
+    fn write_after(&self, _: &mut Vec<u8>) { }
+    fn serialize(&self, buf: &mut Vec<u8>) {
+        self.write_before(buf);
+        self.write_self(buf);
+        self.write_after(buf);
+    }
+}
+
+pub struct SerializeWidgetIter {
+    sct: SerializeChildrenTags
+}
+
+pub struct SerializeChildrenTags {
+    before_child: &'static str,
+    delimiter: &'static str,
+    after_child: &'static str
+}
+
+impl SerializeChildrenTags {
+    fn serialize<'a>(&self, mut children: Box<dyn Iterator<Item=Box<dyn SerializeT>> + 'a>, buf: &mut Vec<u8>) {
+        if let Some(c) = children.nth(0) {
+            buf.extend_from_slice(self.before_child.as_bytes());
+            c.serialize(buf);
+            buf.extend_from_slice(self.after_child.as_bytes());
+        }
+        for c in children {
+            buf.extend_from_slice(self.delimiter.as_bytes());
+            buf.extend_from_slice(self.before_child.as_bytes());
+            c.serialize(buf);
+            buf.extend_from_slice(self.after_child.as_bytes());
+        }
+    }
+}
+
+pub trait SerializeChildrenT {
+    fn children<'a>(&'a self) -> Box<dyn Iterator<Item=Box<dyn SerializeT>> + 'a>;
+    fn write_before_child(&self, _: &mut Vec<u8>) { }
+    fn write_after_child(&self, _: &mut Vec<u8>) { }
+}*/
