@@ -26,12 +26,13 @@ impl MDTitle {
 
 pub struct MDDoc {
     pub title: MDTitle,
+    pub portfolio: String,
     pub body: Vec<u8>
 }
 
 impl MDDoc {
     pub fn empty() -> Self {
-        MDDoc { title: MDTitle::empty(), body: Vec::new() }
+        MDDoc { title: MDTitle::empty(), portfolio: String::new(), body: Vec::new() }
     }
 }
 
@@ -727,6 +728,7 @@ pub trait SerializeT {
 
 pub struct StrategySerializer { }
 pub struct SymbolSerializer { }
+pub struct PortfolioSerializer { }
 pub struct SkipSerializer { }
 
 impl SerializeT for StrategySerializer {
@@ -743,6 +745,15 @@ impl SerializeT for SymbolSerializer {
         let mut tmp = MDDoc::empty();
         w.serialize(&mut tmp);
         buf.title.symbol = String::from_utf8(tmp.body).unwrap();
+        w.serialize(buf);
+    }
+}
+
+impl SerializeT for PortfolioSerializer {
+    fn serialize(w: &Box<dyn Widget>, buf: &mut MDDoc) {
+        let mut tmp = MDDoc::empty();
+        w.serialize(&mut tmp);
+        buf.portfolio = String::from_utf8(tmp.body).unwrap();
         w.serialize(buf);
     }
 }

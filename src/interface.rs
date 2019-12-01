@@ -13,6 +13,7 @@ use crate::render_text::{TextParams};
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::widgets::*;
+use chrono::Datelike;
 
 pub struct CursorMap(HashMap<SystemCursor, Cursor>);
 impl CursorMap {
@@ -175,12 +176,16 @@ impl AppState {
     pub fn serialize(&self) {
         let mut md = MDDoc::empty();
         self.interface.serialize(&mut md);
-        let path = format!("/opt/blocktradingsystems/tradelog/content/holdings/A/{}.md", md.title.symbol);
-        let date = chrono::Local::now().to_rfc3339();
-        let title = format!("---\ntitle: \"{} - {}\"\ndate: {}\ndraft: false\n---\n# Entry\n", md.title.symbol, md.title.strategy, date);
-        let addenda = "\n# Log";
+        let path = format!("/opt/blocktradingsystems/tradelog/content/holdings/{}/{}.md", 
+                           md.portfolio,
+                           md.title.symbol);
+        println!("{}", path);
+        let date = chrono::Local::now();
+        let title = format!("---\ntitle: \"{} - {}\"\ndate: {}\ndraft: false\n---\n# Entry\n", md.title.symbol, md.title.strategy, date.to_rfc3339());
+        let addenda = format!("\n# Log\n* {}/{}/{}", 
+                              date.month(), date.day(), date.year());
         let write_file = || {
-            let mut file = File::create(path)?;
+            let mut file = File::create(&path)?;
             file.write(&title.as_bytes())?;
             file.write(&md.body)?;
             file.write(&addenda.as_bytes())
@@ -245,8 +250,8 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetGrid {
     form += vec![new_label("Pattern:"), new_dropdown( 
         vec![ "Triangle", ], 0, ctx)];
     form += vec![
-        new_serialize::<SkipSerializer>(new_label("Portfolio:")), 
-        new_serialize::<SkipSerializer>(new_dropdown(vec![ "A", "B"], 0, ctx))];
+        new_label("Portfolio:"), 
+        new_serialize::<PortfolioSerializer>(new_dropdown(vec![ "A", "B"], 0, ctx))];
     let border = Border::new(Point::new(5., 5.), rgb_to_f32(0, 0, 0));
     let mut submit = Button::new(border, rgb_to_f32(0, 255, 255), 
         just_cb(Rc::new(|app: &mut AppState| app.serialize()))
