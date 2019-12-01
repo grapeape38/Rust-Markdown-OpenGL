@@ -175,10 +175,10 @@ impl AppState {
     pub fn serialize(&self) {
         let mut md = MDDoc::empty();
         self.interface.serialize(&mut md);
-        let path = "test.md";
+        let path = format!("/opt/blocktradingsystems/tradelog/content/holdings/A/{}.md", md.title.symbol);
         let date = chrono::Local::now().to_rfc3339();
         let title = format!("---\ntitle: \"{} - {}\"\ndate: {}\ndraft: false\n---\n# Entry\n", md.title.symbol, md.title.strategy, date);
-        let addenda = "\n#Log";
+        let addenda = "\n# Log";
         let write_file = || {
             let mut file = File::create(path)?;
             file.write(&title.as_bytes())?;
