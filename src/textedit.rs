@@ -7,7 +7,7 @@ use sdl2::mouse::SystemCursor;
 use crate::primitives::{Point, RotateRect, DrawCtx, rgb_to_f32, Rect, Radians};
 use crate::render_text::{RenderText, TextParams};
 use crate::interface::{EventCtx, AppState, HandleKey};
-use crate::widgets::{Widget, WidgetResponse, WidgetStatus, just_status};
+use crate::widgets::{Widget, WidgetResponse, WidgetStatus, just_status, MDDoc};
 use std::cell::RefCell;
 use std::rc::Rc;
 use sdl2::keyboard::Keycode;
@@ -37,9 +37,9 @@ pub struct TextEdit {
 }
 
 impl TextEdit {
-    fn new(size: Point) -> Self {
+    fn new(text: &str, size: Point) -> Self {
         TextEdit {
-            text_rope: Rope::new(),
+            text_rope: Rope::from_str(text),
             top_line: 0,
             size,
             cursor: TextCursor::new(),
@@ -242,19 +242,17 @@ pub struct TextBox {
     rect: RotateRect
 }
 
-
-
 impl TextBox {
-    pub fn new(size: Point) -> Self {
+    pub fn new(default_text: &str, size: Point) -> Self {
         TextBox {
-            text_edit: Rc::new(RefCell::new(TextEdit::new(size))),
+            text_edit: Rc::new(RefCell::new(TextEdit::new(default_text, size))),
             select_time: None,
             rect: RotateRect::from_rect(Rect{ c1: Point::origin(), c2: size }, Radians(0.))
         }
     }
-    pub fn new_rotated(rect: RotateRect) -> Self {
+    pub fn new_rotated(default_text: &str, rect: RotateRect) -> Self {
         TextBox {
-            text_edit: Rc::new(RefCell::new(TextEdit::new(rect.size))),
+            text_edit: Rc::new(RefCell::new(TextEdit::new(default_text, rect.size))),
             select_time: None,
             rect
         }
@@ -275,10 +273,10 @@ impl Widget for TextBox {
         *ctx.cursor = SystemCursor::IBeam;
         Some(just_status(WidgetStatus::FINE))
     }
-    fn serialize(&self, buf: &mut Vec<u8>) {
+    fn serialize(&self, buf: &mut MDDoc) {
         let rope = &self.text_edit.borrow().text_rope;
         let s = rope.slice(0..rope.len_chars()).as_str().unwrap();
-        buf.extend_from_slice(s.as_bytes())
+        buf.body.extend_from_slice(s.as_bytes())
     }
     fn click(&mut self, off: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
         {
