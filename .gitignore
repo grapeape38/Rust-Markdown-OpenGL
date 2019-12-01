@@ -1,3 +1,5 @@
 /target
 /testing
 **/*.rs.bk
+/dist
+*.sh

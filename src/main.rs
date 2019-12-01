@@ -1,6 +1,5 @@
 extern crate sdl2;
 extern crate gl;
-extern crate rand;
 extern crate nalgebra_glm;
 extern crate bitflags;
 
