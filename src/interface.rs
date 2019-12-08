@@ -87,6 +87,8 @@ pub trait HandleKey {
 
 pub type HandleKeyItem = Rc<RefCell<dyn HandleKey>>;
 
+const INTERFACE_OFFSET: (f32, f32) = (15., 15.);
+
 impl AppState {
     pub fn new(viewport: &Point, window: Window) -> AppState {
         let draw_ctx = DrawCtx::new(viewport);
@@ -116,7 +118,7 @@ impl AppState {
         match *ev {
             Event::MouseButtonDown { mouse_btn, x, y, .. } => {
                 if mouse_btn == sdl2::mouse::MouseButton::Left {
-                    let pt = Point{x: x as f32,y: y as f32};
+                    let pt = Point{x: x as f32 - INTERFACE_OFFSET.0 ,y: y as f32 - INTERFACE_OFFSET.1 };
                     let mut use_cursor = SystemCursor::Arrow;
                     let mut event_ctx = EventCtx {
                         draw_ctx: &self.draw_ctx,
@@ -164,7 +166,7 @@ impl AppState {
     pub fn render(&mut self) {
         if self.needs_draw {
             unsafe { gl::Clear(gl::COLOR_BUFFER_BIT); }
-            self.interface.draw(&Point::origin(), &self.draw_ctx);
+            self.interface.draw(&Point::new(INTERFACE_OFFSET.0, INTERFACE_OFFSET.1), &self.draw_ctx);
             self.window.gl_swap_window();
             self.needs_draw = false;
         }
@@ -228,10 +230,8 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetGrid {
     form += vec![new_label("Symbol:"), new_serialize::<SymbolSerializer>(new_textbox(6, "", ctx))];
     form += vec![new_label("Strategy:"), new_serialize::<StrategySerializer>(new_dropdown( 
         vec![
-            "Mean Reversion Strategy",
             "Trend",
-            "LEVEL_E Extension Pivot Re-Entry",
-            "LEVEL_D Pivot Entry"
+            "Mean Reversion",
         ], 0, ctx))];
     form += vec![new_label("Date:"), Box::new(DateWidget::new(ctx))];
     form += vec![new_label("Volume:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
@@ -239,16 +239,15 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetGrid {
     form += vec![new_label("Range:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
     form += vec![new_label("Level:"), new_h_list(vec![new_dropdown(
         vec![
+            "LEVEL_C",
+            "LEVEL_A",
+            "LEVEL_D",
+            "LEVEL_B",
+            "LEVEL_E",
             "LEVEL_F",
             "LEVEL_G",
-            "LEVEL_A",
-            "LEVEL_B",
-            "LEVEL_C",
-            "LEVEL_D",
-            "LEVEL_E",
-        ], 0, ctx), new_dropdown(vec!["Plus", "Minus"], 0, ctx)], 10, ctx)];
-    form += vec![new_label("Pattern:"), new_dropdown( 
-        vec![ "Triangle", ], 0, ctx)];
+        ], 0, ctx), new_dropdown(vec![" ", "Minus"], 0, ctx)], 10, ctx)];
+    form += vec![new_label("Pattern:"), new_textbox(30, "", ctx)];
     form += vec![
         new_label("Portfolio:"), 
         new_serialize::<PortfolioSerializer>(new_dropdown(vec![ "A", "B"], 0, ctx))];
