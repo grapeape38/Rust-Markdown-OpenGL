@@ -72,7 +72,8 @@ impl Shape {
 
 pub struct AppState {
     pub interface: WidgetGrid,
-    pub key_item: Option<HandleKeyItem>,
+    //pub key_item: Option<HandleKeyItem>,
+    pub select_item: Option<Box<SelectionItem>>,
     pub draw_ctx: DrawCtx,
     window: Window,
     cursors: CursorMap,
@@ -87,15 +88,19 @@ pub trait HandleKey {
 
 pub type HandleKeyItem = Rc<RefCell<dyn HandleKey>>;
 
+const INTERFACE_OFFSET: (f32, f32) = (15., 15.);
+
 impl AppState {
     pub fn new(viewport: &Point, window: Window) -> AppState {
         let draw_ctx = DrawCtx::new(viewport);
-        let interface = new_form(&draw_ctx);
+        let mut interface = new_form(&draw_ctx);
+        interface.select_list.print();
+        let select_item = interface.selection().map(|s| Box::new(s.clone()));
         AppState {
             draw_ctx,
             interface,
             window,
-            key_item: None, 
+            select_item,
             cursors: CursorMap::new(),
             needs_draw: true
         }
@@ -116,7 +121,7 @@ impl AppState {
         match *ev {
             Event::MouseButtonDown { mouse_btn, x, y, .. } => {
                 if mouse_btn == sdl2::mouse::MouseButton::Left {
-                    let pt = Point{x: x as f32,y: y as f32};
+                    let pt = Point{x: x as f32 - INTERFACE_OFFSET.0 ,y: y as f32 - INTERFACE_OFFSET.1 };
                     let mut use_cursor = SystemCursor::Arrow;
                     let mut event_ctx = EventCtx {
                         draw_ctx: &self.draw_ctx,
@@ -124,7 +129,8 @@ impl AppState {
                     };
                     resp = self.interface.click(&pt, &mut event_ctx);
                     if resp.is_none() {
-                        resp = self.interface.deselect();
+                        self.set_select(None);
+                        //resp = self.select_item.as_mut().and_then(|s| s.select.borrow_mut().on_deselect(&mut event_ctx));
                     }
                     self.cursors.get(&use_cursor).set();
                 }
@@ -149,22 +155,38 @@ impl AppState {
     }
     pub fn handle_keyboard_event(&mut self, ev: &Event) {
         let mut resp: Option<WidgetResponse> = None;
-        if let Some(ref key_item) = self.key_item {
+        if let Some(ref select_item) = self.select_item {
             let mut use_cursor = SystemCursor::Arrow;
             if let Event::KeyDown { keycode: Some(keycode), .. } = *ev {
                 let mut event_ctx = EventCtx {
                     draw_ctx: &self.draw_ctx,
                     cursor: &mut use_cursor
                 };
-                resp = key_item.borrow_mut().handle_key_down(&keycode, &mut event_ctx);
+                resp = select_item.select.borrow_mut().handle_key_down(&keycode, &mut event_ctx);
+                if resp.is_none() {
+                    if let Keycode::Tab = keycode { 
+                        self.select_item = self.select_item.as_ref().and_then(|s| s.next.clone());
+                    } 
+                }
             }
         }
+        self.handle_response(&resp);
+    }
+    pub fn set_select(&mut self, select: Option<Box<SelectionItem>>) {
+        let mut use_cursor = SystemCursor::Arrow;
+        let mut event_ctx = EventCtx {
+            draw_ctx: &self.draw_ctx,
+            cursor: &mut use_cursor
+        };
+        let mut resp = self.select_item.as_mut().and_then(|s| s.select.borrow_mut().on_deselect(&mut event_ctx));
+        self.select_item = select;
+        resp = resp.combine(self.select_item.as_mut().and_then(|s| s.select.borrow_mut().on_select(&mut event_ctx)));
         self.handle_response(&resp);
     }
     pub fn render(&mut self) {
         if self.needs_draw {
             unsafe { gl::Clear(gl::COLOR_BUFFER_BIT); }
-            self.interface.draw(&Point::origin(), &self.draw_ctx);
+            self.interface.draw(&Point::new(INTERFACE_OFFSET.0, INTERFACE_OFFSET.1), &self.draw_ctx);
             self.window.gl_swap_window();
             self.needs_draw = false;
         }
@@ -225,30 +247,27 @@ Level:
 
 pub fn new_form(ctx: &DrawCtx) -> WidgetGrid {
     let mut form = WidgetGrid::new(Point::new(10., 10.)).builder(ctx);
-    form += vec![new_label("Symbol:"), new_serialize::<SymbolSerializer>(new_textbox(6, "", ctx))];
-    form += vec![new_label("Strategy:"), new_serialize::<StrategySerializer>(new_dropdown( 
+    form += vec![new_label("Symbol:"), new_textbox(6, "", ctx)];
+    form += vec![new_label("Strategy:"), new_dropdown( 
         vec![
-            "Mean Reversion Strategy",
             "Trend",
-            "LEVEL_E Extension Pivot Re-Entry",
-            "LEVEL_D Pivot Entry"
-        ], 0, ctx))];
+            "Mean Reversion",
+        ], 0, ctx)];
     form += vec![new_label("Date:"), Box::new(DateWidget::new(ctx))];
     form += vec![new_label("Volume:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
     form += vec![new_label("Gap:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
     form += vec![new_label("Range:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
     form += vec![new_label("Level:"), new_h_list(vec![new_dropdown(
         vec![
+            "LEVEL_C",
+            "LEVEL_A",
+            "LEVEL_D",
+            "LEVEL_B",
+            "LEVEL_E",
             "LEVEL_F",
             "LEVEL_G",
-            "LEVEL_A",
-            "LEVEL_B",
-            "LEVEL_C",
-            "LEVEL_D",
-            "LEVEL_E",
-        ], 0, ctx), new_dropdown(vec!["Plus", "Minus"], 0, ctx)], 10, ctx)];
-    form += vec![new_label("Pattern:"), new_dropdown( 
-        vec![ "Triangle", ], 0, ctx)];
+        ], 0, ctx), new_dropdown(vec![" ", "Minus"], 0, ctx)], 10, ctx)];
+    form += vec![new_label("Pattern:"), new_textbox(30, "", ctx)];
     form += vec![
         new_label("Portfolio:"), 
         new_serialize::<PortfolioSerializer>(new_dropdown(vec![ "A", "B"], 0, ctx))];
@@ -257,7 +276,7 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetGrid {
         just_cb(Rc::new(|app: &mut AppState| app.serialize()))
     ).builder(ctx);
     submit += Label::new("Submit", None, None, None, TextParams::new());
-    form += vec![new_serialize::<SkipSerializer>(submit.widget())];
+    form += vec![submit.widget()];
     form.get()
 }
 

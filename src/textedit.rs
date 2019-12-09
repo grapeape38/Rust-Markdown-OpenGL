@@ -7,7 +7,7 @@ use sdl2::mouse::SystemCursor;
 use crate::primitives::{Point, RotateRect, DrawCtx, rgb_to_f32, Rect, Radians};
 use crate::render_text::{RenderText, TextParams};
 use crate::interface::{EventCtx, AppState, HandleKey};
-use crate::widgets::{Widget, WidgetResponse, WidgetStatus, just_status, MDDoc};
+use crate::widgets::{Widget, WidgetResponse, WidgetStatus, just_status, just_cb, MDDoc, SelectionT, SelectionItem};
 use std::cell::RefCell;
 use std::rc::Rc;
 use sdl2::keyboard::Keycode;
@@ -33,6 +33,7 @@ pub struct TextEdit {
     top_line: usize,
     size: Point,
     cursor: TextCursor,
+    select_time: Option<SystemTime>,
     text_params: TextParams,
 }
 
@@ -42,6 +43,7 @@ impl TextEdit {
             text_rope: Rope::from_str(text),
             top_line: 0,
             size,
+            select_time: None,
             cursor: TextCursor::new(),
             text_params: TextParams::new(),
         }
@@ -192,7 +194,7 @@ impl TextEdit {
             }
         }
     }
-    pub fn draw(&self, rect: &RotateRect, select_time: &Option<SystemTime>, draw_ctx: &DrawCtx) {
+    pub fn draw(&self, rect: &RotateRect, draw_ctx: &DrawCtx) {
         let cursor_line = self.text_rope.char_to_line(self.cursor.char_idx);
         let rt = &draw_ctx.render_text;
         let line_height = rt.line_height(self.text_params.scale);
@@ -204,7 +206,7 @@ impl TextEdit {
             let end_idx = self.text_rope.line_to_char(self.top_line + max_lines);
             rt.draw(self.text_rope.slice(start_idx..end_idx).as_str().unwrap(), &self.text_params, &rect, draw_ctx)
         }
-        if let Some(_) = select_time {
+        if let Some(_) = self.select_time {
             //let millis = select_time.elapsed().unwrap().as_millis() % 1000;
             //if millis < 500 {
             let before_str = self.text_rope.slice(self.text_rope.line_to_char(cursor_line)..self.cursor.char_idx).as_str().unwrap();
@@ -232,29 +234,67 @@ impl HandleKey for TextEdit {
         else if *kc == Keycode::Backspace {
             self.delete_char(rt);
         }
+        else {
+            return None
+        }
         Some(just_status(WidgetStatus::REDRAW))
+    }
+}
+
+impl SelectionT for TextEdit {
+    fn on_select(&mut self, ctx: &mut EventCtx) -> Option<WidgetResponse> {
+        self.select_time = Some(SystemTime::now());
+        *ctx.cursor = SystemCursor::IBeam;
+        Some(just_status(WidgetStatus::REDRAW))
+    }
+    fn on_deselect(&mut self, _: &mut EventCtx) -> Option<WidgetResponse> {
+        self.select_time = None;
+        Some(just_status(WidgetStatus::REDRAW))
+    }
+    fn handle_key_down(&mut self, kc: &Keycode, ctx: &EventCtx) -> Option<WidgetResponse> {
+        let rt = &ctx.draw_ctx.render_text;
+        if let Some(ch) = get_char_from_keycode(*kc) {
+            self.insert_char(ch, rt);
+        }
+        else if let Some(dir) = get_dir_from_keycode(*kc) {
+            self.move_cursor(dir);
+        }
+        else if *kc == Keycode::Backspace {
+            self.delete_char(rt);
+        }
+        else {
+            return None
+        }
+        Some(just_status(WidgetStatus::REDRAW))
+    }
+    fn log(&self) {
+        println!("text edit select")
     }
 }
 
 pub struct TextBox {
     text_edit: Rc<RefCell<TextEdit>>,
-    select_time: Option<SystemTime>,
-    rect: RotateRect
+    rect: RotateRect,
+    selection: SelectionItem
 }
 
 impl TextBox {
     pub fn new(default_text: &str, size: Point) -> Self {
+        let text_edit = Rc::new(RefCell::new(TextEdit::new(default_text, size)));
+        let selection = SelectionItem::new(text_edit.clone());
         TextBox {
-            text_edit: Rc::new(RefCell::new(TextEdit::new(default_text, size))),
-            select_time: None,
-            rect: RotateRect::from_rect(Rect{ c1: Point::origin(), c2: size }, Radians(0.))
+            text_edit,
+            rect: RotateRect::from_rect(Rect{ c1: Point::origin(), c2: size }, Radians(0.)),
+            selection,
         }
     }
     pub fn new_rotated(default_text: &str, rect: RotateRect) -> Self {
+        let text_edit = Rc::new(RefCell::new(TextEdit::new(default_text, rect.size)));
+        let selection = SelectionItem::new(text_edit.clone());
         TextBox {
-            text_edit: Rc::new(RefCell::new(TextEdit::new(default_text, rect.size))),
-            select_time: None,
-            rect
+            text_edit,
+            rect,
+            selection
         }
     }
 }
@@ -264,7 +304,7 @@ impl Widget for TextBox {
     fn draw(&self, offset: &Point, draw_ctx: &DrawCtx) {
         let rect = RotateRect { offset: *offset, ..self.rect.clone() };
         rect.builder().color(255, 255, 255).get().draw(draw_ctx);
-        self.text_edit.borrow().draw(&rect, &self.select_time, draw_ctx);
+        self.text_edit.borrow().draw(&rect, draw_ctx);
     }
     fn measure(&self, _: &DrawCtx) -> Point {
         self.rect.size
@@ -282,23 +322,19 @@ impl Widget for TextBox {
         {
             let mut text_edit = self.text_edit.borrow_mut();
             let cursor_pos = text_edit.hover_text(off, &self.rect, &ctx.draw_ctx).unwrap_or(0);
-            self.select_time = Some(SystemTime::now());
             text_edit.set_cursor_pos(cursor_pos);
             *ctx.cursor = SystemCursor::IBeam;
         }
-        let text_edit = self.text_edit.clone();
-        Some((WidgetStatus::REDRAW, Rc::new(move |app: &mut AppState| {
-            app.key_item = Some(text_edit.clone());
+        let selection = self.selection.clone();
+        Some(just_cb(Rc::new(move |app: &mut AppState| {
+            app.set_select(Some(Box::new(selection.clone())));
         })))
     }
+    fn selection(&mut self) -> Option<&mut SelectionItem> {
+        Some(&mut self.selection)
+    }
     fn deselect(&mut self) -> Option<WidgetResponse> { 
-        if self.select_time.is_some() {
-            self.select_time = None;
-            Some((WidgetStatus::REDRAW, Rc::new(move |app: &mut AppState| {
-                app.key_item = None;
-            })))
-        }
-        else { None }
+        None
     }
 }
 

@@ -1,11 +1,12 @@
-extern crate nalgebra_glm;
-extern crate bitflags;
+/*extern crate nalgebra_glm;
+extern crate bitflags;*/
 
 use crate::interface::{CallbackFn, EventCtx, AppState};
 use crate::render_text::{TextParams};
 use crate::textedit::{TextBox};
 use crate::primitives::{DrawCtx, Point, Rect, RotateRect, Radians, Border, BorderRect, InBounds, rgb_to_f32};
 use sdl2::mouse::SystemCursor;
+use sdl2::keyboard::Keycode;
 use nalgebra_glm as glm;
 use bitflags::bitflags;
 use std::rc::Rc;
@@ -56,6 +57,9 @@ pub trait Widget {
     fn deselect(&mut self) -> Option<WidgetResponse> { 
         None
     }
+    fn selection(&mut self) -> Option<&mut SelectionItem> {
+        None
+    }
     fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
         self.measure(ctx)
     }
@@ -83,6 +87,24 @@ pub fn just_status(status: WidgetStatus) -> WidgetResponse {
     (status, no_cb())
 }
 
+pub trait CombineResponse {
+    fn combine(self, other: Self) -> Self where Self: Sized;
+}
+
+impl CombineResponse for Option<WidgetResponse> {
+    fn combine(self, other: Self) -> Self {
+        match self {
+            Some(r) => match other {
+                Some(r2) => {
+                    Some(combine_response(&r, &r2))
+                }
+                None => Some(r) 
+            },
+            None => other 
+        }
+    }
+}
+
 pub fn combine_response(r1: &WidgetResponse, r2: &WidgetResponse) -> WidgetResponse {
     let cb1 = Rc::clone(&r1.1);
     let cb2 = Rc::clone(&r2.1);
@@ -106,13 +128,14 @@ pub struct WidgetList {
     pub size: Point,
     widgets: Vec<Box<dyn Widget>>,
     widget_rects: Vec<Rect>,
-    needs_draw: RefCell<Vec<bool>>
+    needs_draw: RefCell<Vec<bool>>,
+    select_list: SelectionLinkedList
 }
 
 impl WidgetList {
     pub fn new(orientation: Orientation, spacing: u32) -> Self {
         WidgetList { orientation, spacing, widgets: Vec::new(), widget_rects: Vec::new(), needs_draw: RefCell::new(Vec::new()), 
-                     size: Point::origin() }
+                     size: Point::origin(), select_list: SelectionLinkedList::new() }
     }
     
     pub fn get_widget(&self, idx: usize) -> Option<&Box<dyn Widget>> {
@@ -128,9 +151,12 @@ impl WidgetList {
 
 impl WidgetIterT for WidgetList {
     type Child = Box<dyn Widget>;
-    fn add(&mut self, item: Self::Child, ctx: &DrawCtx) {
+    fn add(&mut self, mut item: Self::Child, ctx: &DrawCtx) {
         let m = item.measure(ctx);
         let spacing = if self.widgets.is_empty() { 0. } else { self.spacing as f32 };
+        if let Some(select) = item.selection() {
+            self.select_list.add(select);
+        }
         self.widgets.push(item);
         let mut c1 = Point::origin();
         match self.orientation {
@@ -206,6 +232,9 @@ impl WidgetIterT for WidgetList {
             }
         }
     }
+    fn select_first(&mut self) -> Option<&mut SelectionItem> {
+        self.select_list.head.as_mut()
+    }
 }
 
 pub trait WidgetIterT {
@@ -217,6 +246,7 @@ pub trait WidgetIterT {
     fn measure_items(&self, ctx: &DrawCtx) -> Point;
     fn remeasure_items(&mut self, ctx: &DrawCtx) -> Point;
     fn serialize_items(&self, buf: &mut MDDoc);
+    fn select_first(&mut self) -> Option<&mut SelectionItem> { None }
     fn deselect_self(&mut self) -> Option<WidgetResponse> { None }
     fn click_self(&mut self, _: &Point, _: &mut EventCtx) -> Option<WidgetResponse> { None }
     fn hover_self(&mut self, _: &Point, _: &mut EventCtx) -> Option<WidgetResponse> { None }
@@ -224,11 +254,8 @@ pub trait WidgetIterT {
     fn builder<'a>(self, ctx: &'a DrawCtx) -> WidgetBuilder<'a, Self> where Self: std::marker::Sized + 'static {
         WidgetBuilder::new(self, ctx)
     }
-    fn handle_response(&mut self, resp: Option<(usize, WidgetResponse)>) -> Option<WidgetResponse> {
-        if let Some(_) = resp {
-            return Some(resp.unwrap().1)
-        }
-        None
+    fn handle_response(&mut self, resp: Option<WidgetResponse>) -> Option<WidgetResponse> {
+        resp
     }
 }
 
@@ -273,53 +300,24 @@ impl<T: WidgetIterT> Widget for T {
     }
     fn deselect(&mut self) -> Option<WidgetResponse> {
         self.widgets_mut().fold(None, |resp, w| { 
-            match resp {
-                Some(r) => { 
-                    match w.deselect() {
-                        Some(ref r2) => Some(combine_response(&r, r2)),
-                        None => Some(r)
-                    }
-                }
-                None => { w.deselect() }
-            }
+            resp.combine(w.deselect())
         })
     }
     fn click(&mut self, off_pt: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
-        let mut resp = self.click_self(off_pt, ctx).map(|r| (0, r));
-        for (i, (w, r)) in self.widgets_plus_rects_mut().enumerate() {
+        let mut resp = self.click_self(off_pt, ctx);
+        for (_, (w, r)) in self.widgets_plus_rects_mut().enumerate() {
             if r.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
-                let child_resp = w.click(&(*off_pt - r.c1), ctx);
-                resp = match resp {
-                    Some((_, ref r)) => {
-                        child_resp.map(|r2| (i, combine_response(r, &r2))).or(resp)
-                    }
-                    None => child_resp.map(|r| (i, r))
-                };
+                resp = resp.combine(w.click(&(*off_pt - r.c1), ctx));
                 break;
-            }
-        }
-        if let Some((i, _)) = resp {
-            for (j, w) in self.widgets_mut().enumerate() {
-                if i != j {
-                    if let Some(wr2) = w.deselect() {
-                        resp = Some((i, combine_response(&resp.unwrap().1, &wr2)));
-                    }
-                }
             }
         }
         self.handle_response(resp)
     }
     fn hover(&mut self, off_pt: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
-        let mut resp = self.hover_self(off_pt, ctx).map(|r| (0, r));
-        for (i, (w, rect)) in self.widgets_plus_rects_mut().enumerate() {
+        let mut resp = self.hover_self(off_pt, ctx);
+        for (_, (w, rect)) in self.widgets_plus_rects_mut().enumerate() {
             if rect.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
-                let child_resp = w.hover(&(*off_pt - rect.c1), ctx);
-                resp = match resp {
-                    Some((_, ref r)) => {
-                        child_resp.map(|r2| (i, combine_response(r, &r2))).or(resp)
-                    }
-                    None => child_resp.map(|r| (i, r))
-                };
+                resp = resp.combine(w.hover(&(*off_pt - rect.c1), ctx));
                 break;
             }
         }
@@ -334,24 +332,28 @@ impl<T: WidgetIterT> Widget for T {
     fn serialize(&self, buf: &mut MDDoc) {
         self.serialize_items(buf)
     }
+    fn selection(&mut self) -> Option<&mut SelectionItem> {
+        self.select_first()
+    }
 }
 
 pub struct WidgetGrid {
     rows: Vec<Vec<Box<dyn Widget>>>,
     widget_rects: Vec<Vec<Rect>>,
     spacing: Point,
-    size: Point
+    size: Point,
+    pub select_list: SelectionLinkedList
 }
 
 impl WidgetGrid {
     pub fn new(spacing: Point) -> Self {
-        WidgetGrid { rows: Vec::new(), widget_rects: Vec::new(), spacing, size: Point::origin() }
+        WidgetGrid { rows: Vec::new(), widget_rects: Vec::new(), spacing, size: Point::origin(), select_list: SelectionLinkedList::new() }
     }
 }
 
 impl WidgetIterT for WidgetGrid {
     type Child = Vec<Box<dyn Widget>>;
-    fn add(&mut self, new_row: Self::Child, ctx: &DrawCtx) {
+    fn add(&mut self, mut new_row: Self::Child, ctx: &DrawCtx) {
         let max_n_col = self.rows.iter().max_by_key(|r| r.len()).map(|r| r.len()).unwrap_or(0)
             .max(new_row.len());
         let mut max_col_widths: Vec<f32> = vec![0.; max_n_col];
@@ -362,13 +364,16 @@ impl WidgetIterT for WidgetGrid {
         }
         let mut new_rects = Vec::new();
         let mut max_height: f32 = 0.;
-        for (i, w) in new_row.iter().enumerate() {
+        for (i, w) in new_row.iter_mut().enumerate() {
             let m = w.measure(ctx);
             max_col_widths[i] = max_col_widths[i].max(m.x);
             let offset = Point::new(0., self.size.y);
             let new_rect = Rect { c1: offset, c2: offset + m };
             new_rects.push(new_rect);
             max_height = max_height.max(m.y);
+            if let Some(select) = w.selection() {
+                self.select_list.add(select);
+            }
         }
         self.widget_rects.push(new_rects);
         self.size.y += max_height + self.spacing.y;
@@ -434,6 +439,9 @@ impl WidgetIterT for WidgetGrid {
         }
         Point::origin()
     }
+    fn select_first(&mut self) -> Option<&mut SelectionItem> {
+        self.select_list.head.as_mut()
+    }
 }
 
 pub fn new_label<T: Into<String>>(text: T) -> Box<dyn Widget> {
@@ -471,6 +479,9 @@ impl Widget for DateWidget {
     }
     fn deselect(&mut self) -> Option<WidgetResponse> { 
         self.wl.deselect()
+    }
+    fn selection(&mut self) -> Option<&mut SelectionItem> {
+        self.wl.selection()
     }
     fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
         self.wl.remeasure(ctx)
@@ -570,16 +581,72 @@ pub fn new_v_list(widgets: Vec<Box<dyn Widget>>, spacing: u32, ctx: &DrawCtx) ->
     Box::new(wl)
 }
 
+#[derive(Debug)]
+pub struct DropDownSelect {
+    selected: usize,
+    is_focus: bool,
+    open: bool,
+    max_value: usize
+}
+
+impl DropDownSelect {
+    fn new(selected: usize, is_focus: bool, max_value: usize) -> Self {
+        DropDownSelect { selected, is_focus, max_value, open: false }
+    }
+}
+
+impl SelectionT for DropDownSelect {
+    fn on_select(&mut self, _: &mut EventCtx) -> Option<WidgetResponse> { 
+        self.is_focus = true;
+        Some(just_status(WidgetStatus::REDRAW))
+    }
+    fn on_deselect(&mut self, _: &mut EventCtx) -> Option<WidgetResponse> {
+        self.is_focus = false;
+        if !self.open {
+            Some(just_status(WidgetStatus::REDRAW))
+        }
+        else {
+            self.open = false;
+            Some(just_status(WidgetStatus::REMEASURE))
+        }
+    }
+    fn handle_key_down(&mut self, kc: &Keycode, _: &EventCtx) -> Option<WidgetResponse> {
+        match *kc {
+            Keycode::Down => { 
+                if self.selected < self.max_value {
+                    self.selected += 1;
+                    Some(just_status(WidgetStatus::REDRAW))
+                }
+                else { None }
+            }
+            Keycode::Up => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                    Some(just_status(WidgetStatus::REDRAW))
+                }
+                else { None }
+            }
+            _ => None
+        }
+    }
+    fn log(&self) {
+        println!("{:?}", self);
+    }
+}
+
 pub struct DropDown {
     selected: usize,
     hover_idx: usize,
     values_list: WidgetList,
     open: bool,
+    dd_select: Rc<RefCell<DropDownSelect>>,
+    selection: SelectionItem
 }
 
 impl DropDown {
     pub fn new<T: Into<String> + AsRef<str>>(values: Vec<T>, selected: usize, ctx: &DrawCtx) -> Self {
         let mut values_list = WidgetList::new(Orientation::Vertical, 0);
+        let n_vals = values.len();
         let char_size = ctx.render_text.char_size('a', 1.0);
         let white = rgb_to_f32(255, 255, 255);
         let lb = rgb_to_f32(168, 238, 240);
@@ -591,11 +658,12 @@ impl DropDown {
         for v in values.into_iter() {
             values_list.add(Box::new(Label::new(v, Some(white), Some(lb), Some(max_width), TextParams::new())), ctx);
         }
-        DropDown { values_list, selected, hover_idx: 0, open: false }
+        let dd_select = Rc::new(RefCell::new(DropDownSelect::new(selected, false, n_vals - 1)));
+        let selection = SelectionItem::new(dd_select.clone());
+        DropDown { values_list, selected, hover_idx: 0, open: false, dd_select, selection }
     }
     fn draw_triangle(&self, off: &Point, ctx: &DrawCtx) {
         let char_size = ctx.render_text.char_size('a', 1.0);
-        //let height = self.values_list.get_widget(0).as_ref().unwrap().measure(ctx).y;
         let blue = glm::vec4(0.,0.,1., 1.);
         let tri_center = Point::new(
             off.x + self.values_list.size.x - char_size.x / 2.,
@@ -606,7 +674,7 @@ impl DropDown {
 
 impl Widget for DropDown {
     fn measure(&self, ctx: &DrawCtx) -> Point {
-        if !self.open {
+        if !self.dd_select.borrow().open {
             self.values_list.get_widget(0).as_ref().unwrap().measure(ctx)
         }
         else {
@@ -622,8 +690,10 @@ impl Widget for DropDown {
         }
     }
     fn draw(&self, off: &Point, ctx: &DrawCtx) {
-        if !self.open {
-            self.values_list.get_widget(self.selected).map(|w| w.draw(off, ctx));
+        let open = self.dd_select.borrow().open;
+        let selected = self.dd_select.borrow().selected;
+        if !open {
+            self.values_list.get_widget(selected).map(|w| w.draw(off, ctx));
         }
         else {
             self.values_list.draw(off, ctx);
@@ -631,18 +701,24 @@ impl Widget for DropDown {
         self.draw_triangle(off, ctx);
     }
     fn click(&mut self, off_pt: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
-        if self.open {
+        let open = self.dd_select.borrow().open;
+        if open {
             self.selected = self.values_list.get_idx(off_pt, ctx.draw_ctx).unwrap_or(0);
             self.values_list.get_widget_mut(self.hover_idx).and_then(|w| w.deselect());
         }
         else {
             self.values_list.get_widget_mut(self.hover_idx).and_then(|w| w.hover(off_pt, ctx));
         }
-        self.open = !self.open;
-        Some(just_status(WidgetStatus::REMEASURE))
+        self.dd_select.borrow_mut().open = !open;
+        let select = self.selection.clone();
+        Some((WidgetStatus::REMEASURE,
+            Rc::new(move |app: &mut AppState| {
+                app.set_select(Some(Box::new(select.clone())));
+            })))
     }
     fn hover(&mut self, off_pt: &Point, ctx: &mut EventCtx) -> Option<WidgetResponse> {
-        if self.open {
+        let open = self.dd_select.borrow().open;
+        if open {
             let hover_idx = self.values_list.get_idx(off_pt, ctx.draw_ctx).unwrap_or(0);
             if hover_idx != self.hover_idx {
                 self.values_list.get_widget_mut(self.hover_idx).map(|w| w.deselect());
@@ -656,6 +732,9 @@ impl Widget for DropDown {
     }
     fn serialize(&self, buf: &mut MDDoc) {
         self.values_list.get_widget(self.selected).map(|w| w.serialize(buf));
+    }
+    fn selection(&mut self) -> Option<&mut SelectionItem> {
+        Some(&mut self.selection)
     }
     fn deselect(&mut self) -> Option<WidgetResponse> {
         let r = self.values_list.deselect();
@@ -798,3 +877,113 @@ impl<T: SerializeT> Widget for SerializeWidget<T> {
         T::serialize(&self.widget, buf);
     }
 }
+
+pub trait SelectionT {
+    fn on_select(&mut self, ctx: &mut EventCtx) -> Option<WidgetResponse>;
+    fn on_deselect(&mut self, _: &mut EventCtx) -> Option<WidgetResponse> { 
+        None 
+    }
+    fn handle_key_down(&mut self, _: &Keycode, _: &EventCtx) -> Option<WidgetResponse> {
+        None
+    }
+    fn log(&self);
+}
+
+#[derive(Clone)]
+pub struct SelectionItem {
+    pub select: Rc<RefCell<dyn SelectionT>>,
+    pub prev: Option<Box<SelectionItem>>,
+    pub next: Option<Box<SelectionItem>>
+}
+
+impl SelectionItem {
+    pub fn new(select: Rc<RefCell<dyn SelectionT>>) -> Self {
+        SelectionItem { select, prev: None, next: None }
+    }
+}
+
+pub struct SelectionLinkedList {
+    pub head: Option<SelectionItem>,
+    pub tail: Option<SelectionItem>
+}
+
+impl SelectionLinkedList {
+    fn new() -> Self {
+        SelectionLinkedList { head: None, tail: None }
+    }
+    fn add(&mut self, select: &mut SelectionItem) {
+        println!("Adding: ");
+        select.select.borrow().log();
+        if self.head.is_none() {
+            self.head = Some(select.clone());
+        }
+        if let Some(ref mut tail) = self.tail {
+            tail.next = Some(Box::new(select.clone()));
+            select.prev = Some(Box::new(tail.clone()))
+        }
+        self.tail = Some(select.clone());
+        println!("New list: ");
+        self.print();
+    }
+    #[allow(dead_code)]
+    pub fn print(&self) {
+        let mut cur = self.head.as_ref().map(|h| Box::new(h.clone()));
+        while let Some(ref s) = cur {
+            s.select.borrow().log();
+            cur = cur.unwrap().next;
+        } 
+    }
+}
+
+struct SelectTree<'a> {
+    root: Box<SelectNode<'a>>
+}
+
+impl<'a> SelectTree<'a> {
+    fn iter(&'a self) -> SelectTreeIt<'a> {
+        SelectTreeIt { stack: vec![(&self.root, 0)] }
+    }
+}
+
+struct SelectNode<'a> {
+    select: &'a dyn SelectionT,
+    children: Vec<Box<SelectNode<'a>>>
+}
+
+impl<'a> SelectNode<'a> {
+    fn new(select: &'a dyn SelectionT, children: Vec<Box<SelectNode<'a>>>) -> Self {
+        SelectNode {
+            select,
+            children
+        }
+    }
+    fn add(&mut self, s: SelectNode<'a>) {
+        self.children.push(Box::new(s));
+    }
+}
+
+struct SelectTreeIt<'a> {
+    stack: Vec<(&'a Box<SelectNode<'a>>, usize)>
+}
+
+impl<'a> Iterator for SelectTreeIt<'a> {
+    type Item = &'a Box<SelectNode<'a>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some((ref cur, ref mut child)) = self.stack.last_mut() {
+            if *child == 0 {
+                *child += 1;
+                return Some(cur);
+            }
+            else if *child <= cur.children.len() {
+                let c = (&cur.children[*child - 1], 0);
+                *child += 1;
+                self.stack.push(c);
+            }
+            else {
+                self.stack.pop();
+            }
+        }
+        None
+    }
+}
+
