@@ -1,32 +1,56 @@
-extern crate sdl2;
 extern crate chrono;
+extern crate sdl2;
 
-use std::collections::{HashMap};
+use crate::primitives::*;
+use crate::render_text::TextParams;
+use crate::widgets::*;
+use chrono::Datelike;
 use sdl2::event::Event;
 use sdl2::keyboard::{Keycode, Mod};
 use sdl2::mouse::{Cursor, SystemCursor};
 use sdl2::video::Window;
-use std::fs::File;
-use std::io::{Write};
-use crate::primitives::*;
-use crate::render_text::{TextParams};
-use std::rc::Rc;
 use std::cell::RefCell;
-use crate::widgets::*;
-use chrono::Datelike;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
+use std::rc::Rc;
 
 pub struct CursorMap(HashMap<SystemCursor, Cursor>);
 impl CursorMap {
     fn new() -> Self {
         let mut m = HashMap::new();
-        m.insert(SystemCursor::Arrow, Cursor::from_system(SystemCursor::Arrow).unwrap());
-        m.insert(SystemCursor::Hand, Cursor::from_system(SystemCursor::Hand).unwrap());
-        m.insert(SystemCursor::Crosshair, Cursor::from_system(SystemCursor::Crosshair).unwrap());
-        m.insert(SystemCursor::SizeNESW, Cursor::from_system(SystemCursor::SizeNESW).unwrap());
-        m.insert(SystemCursor::SizeNS, Cursor::from_system(SystemCursor::SizeNS).unwrap());
-        m.insert(SystemCursor::SizeNWSE, Cursor::from_system(SystemCursor::SizeNWSE).unwrap());
-        m.insert(SystemCursor::SizeWE, Cursor::from_system(SystemCursor::SizeWE).unwrap());
-        m.insert(SystemCursor::IBeam, Cursor::from_system(SystemCursor::IBeam).unwrap());
+        m.insert(
+            SystemCursor::Arrow,
+            Cursor::from_system(SystemCursor::Arrow).unwrap(),
+        );
+        m.insert(
+            SystemCursor::Hand,
+            Cursor::from_system(SystemCursor::Hand).unwrap(),
+        );
+        m.insert(
+            SystemCursor::Crosshair,
+            Cursor::from_system(SystemCursor::Crosshair).unwrap(),
+        );
+        m.insert(
+            SystemCursor::SizeNESW,
+            Cursor::from_system(SystemCursor::SizeNESW).unwrap(),
+        );
+        m.insert(
+            SystemCursor::SizeNS,
+            Cursor::from_system(SystemCursor::SizeNS).unwrap(),
+        );
+        m.insert(
+            SystemCursor::SizeNWSE,
+            Cursor::from_system(SystemCursor::SizeNWSE).unwrap(),
+        );
+        m.insert(
+            SystemCursor::SizeWE,
+            Cursor::from_system(SystemCursor::SizeWE).unwrap(),
+        );
+        m.insert(
+            SystemCursor::IBeam,
+            Cursor::from_system(SystemCursor::IBeam).unwrap(),
+        );
         CursorMap(m)
     }
     fn get(&self, cursor: &SystemCursor) -> &Cursor {
@@ -49,12 +73,8 @@ impl Shape {
     }
     fn click(&self, p: &Point, vp: &Point) -> ClickResponse {
         match self.in_bounds(p, vp) {
-            true => {
-                ClickResponse::Clicked
-            }
-            false => {
-                ClickResponse::NotClicked
-            }
+            true => ClickResponse::Clicked,
+            false => ClickResponse::NotClicked,
         }
     }
     fn in_select_box(&self, r: &Rect, vp: &Point) -> bool {
@@ -65,15 +85,15 @@ impl Shape {
             Shape::Polygon(ref mut draw_poly) => {
                 draw_poly.rect = r.clone();
             }
-            Shape::Line(_) => { }
+            Shape::Line(_) => {}
         }
     }
 }
 
 pub struct AppState {
-    pub interface: WidgetGrid,
+    pub interface: Box<dyn Widget>,
     //pub key_item: Option<HandleKeyItem>,
-    pub select_item: Option<Box<SelectionItem>>,
+    pub select_state: SelectionState,
     pub draw_ctx: DrawCtx,
     window: Window,
     cursors: CursorMap,
@@ -93,16 +113,16 @@ const INTERFACE_OFFSET: (f32, f32) = (15., 15.);
 impl AppState {
     pub fn new(viewport: &Point, window: Window) -> AppState {
         let draw_ctx = DrawCtx::new(viewport);
-        let mut interface = new_form(&draw_ctx);
-        interface.select_list.print();
-        let select_item = interface.selection().map(|s| Box::new(s.clone()));
+        let interface = new_form(&draw_ctx);
+        let select_state = SelectionState::new(&interface);
+        select_state.print();
         AppState {
             draw_ctx,
             interface,
             window,
-            select_item,
+            select_state,
             cursors: CursorMap::new(),
-            needs_draw: true
+            needs_draw: true,
         }
     }
     pub fn handle_response(&mut self, resp: &Option<WidgetResponse>) {
@@ -116,77 +136,95 @@ impl AppState {
             cb(self);
         }
     }
-    pub fn handle_mouse_event(&mut self, ev: &Event, _: &Mod) {
-        let mut resp: Option<WidgetResponse> = None;
-        match *ev {
-            Event::MouseButtonDown { mouse_btn, x, y, .. } => {
-                if mouse_btn == sdl2::mouse::MouseButton::Left {
-                    let pt = Point{x: x as f32 - INTERFACE_OFFSET.0 ,y: y as f32 - INTERFACE_OFFSET.1 };
-                    let mut use_cursor = SystemCursor::Arrow;
-                    let mut event_ctx = EventCtx {
-                        draw_ctx: &self.draw_ctx,
-                        cursor: &mut use_cursor
-                    };
-                    resp = self.interface.click(&pt, &mut event_ctx);
-                    if resp.is_none() {
-                        self.set_select(None);
-                        //resp = self.select_item.as_mut().and_then(|s| s.select.borrow_mut().on_deselect(&mut event_ctx));
-                    }
-                    self.cursors.get(&use_cursor).set();
-                }
-            } 
-            Event::MouseButtonUp{mouse_btn, .. } => {
-                if mouse_btn == sdl2::mouse::MouseButton::Left {
-                }
-            }
-            Event::MouseMotion{ x, y, ..} => {
-                let pt = Point{x: x as f32,y: y as f32};
-                let mut use_cursor = SystemCursor::Arrow;
-                let mut event_ctx = EventCtx {
-                    draw_ctx: &self.draw_ctx,
-                    cursor: &mut use_cursor
-                };
-                resp = self.interface.hover(&pt, &mut event_ctx);
-                self.cursors.get(&use_cursor).set();
-            }
-            _ => {}
+    /*pub fn new_widget_ctx<'a>(&'a self, use_cursor: &'a mut SystemCursor) -> WidgetEventCtx<'a> {
+        WidgetEventCtx { 
+            draw_ctx: &self.draw_ctx,
+            cursor: use_cursor,
+            select_ctx: SelectCtx {
+                state: &self.select_state,
+                select_pos: 0
+            },
+            widget_idx: 0,
         }
+    }*/
+    pub fn handle_mouse_event(&mut self, ev: &Event, _: &Mod) {
+        let mut use_cursor = SystemCursor::Arrow;
+        /*let mut event_ctx = EventCtx {
+            draw_ctx: &self.draw_ctx,
+            cursor: &mut use_cursor,
+        };*/
+        let mut widget_ctx = WidgetEventCtx::new(&self.draw_ctx, &mut use_cursor, &self.select_state);
+        let resp = match *ev {
+            Event::MouseButtonDown {
+                mouse_btn, x, y, ..
+            } => {
+                if mouse_btn == sdl2::mouse::MouseButton::Left {
+                    let pt = Point {
+                        x: x as f32 - INTERFACE_OFFSET.0,
+                        y: y as f32 - INTERFACE_OFFSET.1,
+                    };
+                    self.interface.click(&pt, &mut widget_ctx)
+                        //.or(self.select_state.set_select(None, &mut event_ctx))
+                }
+                else { None }
+            }
+            Event::MouseButtonUp { mouse_btn, .. } => {
+                if mouse_btn == sdl2::mouse::MouseButton::Left {}
+                None
+            }
+            Event::MouseMotion { x, y, .. } => {
+                let pt = Point {
+                    x: x as f32,
+                    y: y as f32,
+                };
+                self.interface.hover(&pt, &mut widget_ctx)
+            }
+            _ => { None }
+        };
+        self.cursors.get(&use_cursor).set();
         self.handle_response(&resp);
     }
     pub fn handle_keyboard_event(&mut self, ev: &Event) {
         let mut resp: Option<WidgetResponse> = None;
-        if let Some(ref select_item) = self.select_item {
-            let mut use_cursor = SystemCursor::Arrow;
-            if let Event::KeyDown { keycode: Some(keycode), .. } = *ev {
-                let mut event_ctx = EventCtx {
-                    draw_ctx: &self.draw_ctx,
-                    cursor: &mut use_cursor
-                };
-                resp = select_item.select.borrow_mut().handle_key_down(&keycode, &mut event_ctx);
+        let mut use_cursor = SystemCursor::Arrow;
+        let mut event_ctx = EventCtx {
+            draw_ctx: &self.draw_ctx,
+            cursor: &mut use_cursor,
+        };
+        if let Event::KeyDown {
+            keycode: Some(keycode),
+            ..
+        } = *ev {
+            if self.select_state.is_select() {
+                resp = self.select_state.handle_key_down(&keycode, &mut event_ctx);
                 if resp.is_none() {
-                    if let Keycode::Tab = keycode { 
-                        self.select_item = self.select_item.as_ref().and_then(|s| s.next.clone());
-                    } 
+                    if let Keycode::Tab = keycode {
+                        resp = self.select_state.select_next(&mut event_ctx);
+                    }
                 }
             }
         }
         self.handle_response(&resp);
     }
-    pub fn set_select(&mut self, select: Option<Box<SelectionItem>>) {
+    pub fn set_select(&mut self, select_idx: Option<usize>) {
         let mut use_cursor = SystemCursor::Arrow;
         let mut event_ctx = EventCtx {
             draw_ctx: &self.draw_ctx,
-            cursor: &mut use_cursor
+            cursor: &mut use_cursor,
         };
-        let mut resp = self.select_item.as_mut().and_then(|s| s.select.borrow_mut().on_deselect(&mut event_ctx));
-        self.select_item = select;
-        resp = resp.combine(self.select_item.as_mut().and_then(|s| s.select.borrow_mut().on_select(&mut event_ctx)));
+        let resp = self.select_state.set_select(select_idx, &mut event_ctx);
         self.handle_response(&resp);
     }
     pub fn render(&mut self) {
         if self.needs_draw {
-            unsafe { gl::Clear(gl::COLOR_BUFFER_BIT); }
-            self.interface.draw(&Point::new(INTERFACE_OFFSET.0, INTERFACE_OFFSET.1), &self.draw_ctx);
+            unsafe {
+                gl::Clear(gl::COLOR_BUFFER_BIT);
+            }
+            let mut widget_ctx = WidgetDrawCtx::new(&self.draw_ctx, &self.select_state);
+            self.interface.draw(
+                &Point::new(INTERFACE_OFFSET.0, INTERFACE_OFFSET.1),
+                &mut widget_ctx,
+            );
             self.window.gl_swap_window();
             self.needs_draw = false;
         }
@@ -198,14 +236,19 @@ impl AppState {
     pub fn serialize(&self) {
         let mut md = MDDoc::empty();
         self.interface.serialize(&mut md);
-        let path = format!("/opt/blocktradingsystems/tradelog/content/holdings/{}/{}.md", 
-                           md.portfolio,
-                           md.title.symbol);
+        let path = format!(
+            "/opt/blocktradingsystems/tradelog/content/holdings/{}/{}.md",
+            md.portfolio, md.title.symbol
+        );
         println!("{}", path);
         let date = chrono::Local::now();
-        let title = format!("---\ntitle: \"{} - {}\"\ndate: {}\ndraft: false\n---\n# Entry\n", md.title.symbol, md.title.strategy, date.to_rfc3339());
-        let addenda = format!("\n# Log\n* {}/{}/{}", 
-                              date.month(), date.day(), date.year());
+        let title = format!(
+            "---\ntitle: \"{} - {}\"\ndate: {}\ndraft: false\n---\n# Entry\n",
+            md.title.symbol,
+            md.title.strategy,
+            date.to_rfc3339()
+        );
+        let addenda = format!("\n# Log\n* {}/{}/{}", date.month(), date.day(), date.year());
         let write_file = || {
             let mut file = File::create(&path)?;
             file.write(&title.as_bytes())?;
@@ -213,8 +256,12 @@ impl AppState {
             file.write(&addenda.as_bytes())
         };
         match write_file() {
-            Ok(_) => { println!("Wrote to file {}", path); }
-            Err(e) => { println!("Error writing to file {:?}", e); }
+            Ok(_) => {
+                println!("Wrote to file {}", path);
+            }
+            Err(e) => {
+                println!("Error writing to file {:?}", e);
+            }
         }
     }
 }
@@ -245,48 +292,61 @@ Level:
     LEVEL_E
  */
 
-pub fn new_form(ctx: &DrawCtx) -> WidgetGrid {
-    let mut form = WidgetGrid::new(Point::new(10., 10.)).builder(ctx);
-    form += vec![new_label("Symbol:"), new_textbox(6, "", ctx)];
-    form += vec![new_label("Strategy:"), new_dropdown( 
-        vec![
-            "Trend",
-            "Mean Reversion",
-        ], 0, ctx)];
-    form += vec![new_label("Date:"), Box::new(DateWidget::new(ctx))];
-    form += vec![new_label("Volume:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
-    form += vec![new_label("Gap:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
-    form += vec![new_label("Range:"), new_dropdown(vec![ "Yes", "No"], 0, ctx)];
-    form += vec![new_label("Level:"), new_h_list(vec![new_dropdown(
-        vec![
-            "LEVEL_C",
-            "LEVEL_A",
-            "LEVEL_D",
-            "LEVEL_B",
-            "LEVEL_E",
-            "LEVEL_F",
-            "LEVEL_G",
-        ], 0, ctx), new_dropdown(vec![" ", "Minus"], 0, ctx)], 10, ctx)];
-    form += vec![new_label("Pattern:"), new_textbox(30, "", ctx)];
+pub fn new_form(ctx: &DrawCtx) -> Box<dyn Widget> {//WidgetGrid {
+    let mut form = WidgetGrid::new(Point::new(10., 10.)).builder();
+    form += vec![new_label("Symbol:"), new_textbox("", 6)];
     form += vec![
-        new_label("Portfolio:"), 
-        new_serialize::<PortfolioSerializer>(new_dropdown(vec![ "A", "B"], 0, ctx))];
+        new_label("Strategy:"),
+        new_dropdown(vec!["Trend", "Mean Reversion"], 0),
+    ];
+    form += vec![new_label("Date:"), Box::new(DateWidget::new())];
+    form += vec![
+        new_label("Volume:"),
+        new_dropdown(vec!["Yes", "No"], 0),
+    ];
+    form += vec![new_label("Gap:"), new_dropdown(vec!["Yes", "No"], 0)];
+    form += vec![new_label("Range:"), new_dropdown(vec!["Yes", "No"], 0)];
+    form += vec![
+        new_label("Level:"),
+        new_h_list(
+            vec![
+                new_dropdown(
+                    vec![
+                        "LEVEL_C", "LEVEL_A", "LEVEL_D", "LEVEL_B", "LEVEL_E", "LEVEL_F", "LEVEL_G",
+                    ],
+                    0,
+                ),
+                new_dropdown(vec![" ", "Minus"], 0),
+            ],
+            10,
+        ),
+    ];
+    form += vec![new_label("Pattern:"), new_textbox("", 30)];
+    form += vec![
+        new_label("Portfolio:"),
+        new_serialize::<PortfolioSerializer>(new_dropdown(vec!["A", "B"], 0)),
+    ];
     let border = Border::new(Point::new(5., 5.), rgb_to_f32(0, 0, 0));
-    let mut submit = Button::new(border, rgb_to_f32(0, 255, 255), 
-        just_cb(Rc::new(|app: &mut AppState| app.serialize()))
-    ).builder(ctx);
+    let mut submit = Button::new(
+        border,
+        rgb_to_f32(0, 255, 255),
+        just_cb(Rc::new(|app: &mut AppState| app.serialize())),
+    )
+    .builder();
     submit += Label::new("Submit", None, None, None, TextParams::new());
     form += vec![submit.widget()];
-    form.get()
+    let mut w = form.widget();
+    w.remeasure(ctx);
+    w
 }
 
 pub struct EventCtx<'a> {
     pub draw_ctx: &'a DrawCtx,
-    pub cursor: &'a mut SystemCursor
+    pub cursor: &'a mut SystemCursor,
 }
 
 #[derive(Copy, Clone, PartialEq)]
 enum ClickResponse {
     Clicked,
-    NotClicked
+    NotClicked,
 }

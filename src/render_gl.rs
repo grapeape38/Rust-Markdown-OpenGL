@@ -2,20 +2,24 @@ extern crate gl;
 extern crate nalgebra_glm;
 use nalgebra_glm as glm;
 
-use gl::types::{GLuint, GLint, GLenum, GLchar};
-use std::ffi::{CString, CStr};
+use gl::types::{GLchar, GLenum, GLint, GLuint};
+use std::ffi::{CStr, CString};
 
 pub struct Program {
-    id: GLuint
+    id: GLuint,
 }
 
 impl Program {
     pub fn from_shaders(shaders: &[Shader]) -> Result<Program, String> {
         let program_id = unsafe { gl::CreateProgram() };
         for shader in shaders {
-            unsafe { gl::AttachShader(program_id, shader.id()); }
+            unsafe {
+                gl::AttachShader(program_id, shader.id());
+            }
         }
-        unsafe { gl::LinkProgram(program_id); }
+        unsafe {
+            gl::LinkProgram(program_id);
+        }
         let mut success: GLint = 1;
         unsafe {
             gl::GetProgramiv(program_id, gl::LINK_STATUS, &mut success);
@@ -31,32 +35,40 @@ impl Program {
                     program_id,
                     len,
                     std::ptr::null_mut(),
-                    error.as_ptr() as *mut GLchar
+                    error.as_ptr() as *mut GLchar,
                 );
             }
             return Err(error.to_string_lossy().into_owned());
         }
         for shader in shaders {
-            unsafe { gl::DetachShader(program_id, shader.id()); }
+            unsafe {
+                gl::DetachShader(program_id, shader.id());
+            }
         }
         Ok(Program { id: program_id })
     }
 
-    pub fn id(&self) -> GLuint { self.id }
+    pub fn id(&self) -> GLuint {
+        self.id
+    }
 
     pub fn set_used(&self) {
-        unsafe { gl::UseProgram(self.id); }
+        unsafe {
+            gl::UseProgram(self.id);
+        }
     }
 }
 
 impl Drop for Program {
     fn drop(&mut self) {
-        unsafe { gl::DeleteProgram(self.id); }
+        unsafe {
+            gl::DeleteProgram(self.id);
+        }
     }
 }
 
 pub struct Shader {
-    id: GLuint
+    id: GLuint,
 }
 
 impl Shader {
@@ -80,7 +92,9 @@ impl Shader {
 
 impl Drop for Shader {
     fn drop(&mut self) {
-        unsafe { gl::DeleteShader(self.id); }
+        unsafe {
+            gl::DeleteShader(self.id);
+        }
     }
 }
 
@@ -97,7 +111,12 @@ fn shader_from_source(source: &CStr, kind: GLuint) -> Result<GLuint, String> {
     if success == 0 {
         let error = create_whitespace_cstring_with_len(err_len as usize);
         unsafe {
-            gl::GetShaderInfoLog(id, err_len, std::ptr::null_mut(), error.as_ptr() as *mut GLchar);
+            gl::GetShaderInfoLog(
+                id,
+                err_len,
+                std::ptr::null_mut(),
+                error.as_ptr() as *mut GLchar,
+            );
         }
         return Err(error.to_string_lossy().into_owned());
     }
@@ -111,12 +130,14 @@ fn create_whitespace_cstring_with_len(len: usize) -> CString {
 }
 
 pub struct GChar {
-    cstr: CString
+    cstr: CString,
 }
 
 impl GChar {
     pub fn new(s: &str) -> GChar {
-        GChar { cstr:  CString::new(s.as_bytes()).unwrap() }
+        GChar {
+            cstr: CString::new(s.as_bytes()).unwrap(),
+        }
     }
     pub fn ptr(&self) -> *const GLchar {
         self.cstr.as_ptr() as *const GLchar
@@ -138,44 +159,40 @@ pub trait SendUniforms {
     fn send_uniforms(&self, prog_id: GLuint) -> Result<(), String>;
 }
 
-unsafe fn get_uniform_location(prog_id: GLuint, name: &str) -> Result<i32, String>
-{
+unsafe fn get_uniform_location(prog_id: GLuint, name: &str) -> Result<i32, String> {
     let loc = gl::GetUniformLocation(prog_id, GChar::new(name).ptr());
     if loc < 0 {
         return Err("Could not get uniform location".to_string());
     }
-    return Ok(loc)
+    return Ok(loc);
 }
 
 impl SendUniform for glm::Vec2 {
     unsafe fn uniform(&self, loc: GLint) {
-        gl::Uniform2fv(loc, 1, self.as_ptr()); 
+        gl::Uniform2fv(loc, 1, self.as_ptr());
     }
 }
 
 impl SendUniform for glm::Vec3 {
     unsafe fn uniform(&self, loc: GLint) {
-        gl::Uniform3fv(loc, 1, self.as_ptr()); 
+        gl::Uniform3fv(loc, 1, self.as_ptr());
     }
 }
 
 impl SendUniform for glm::Vec4 {
     unsafe fn uniform(&self, loc: GLint) {
-        gl::Uniform4fv(loc, 1, self.as_ptr()); 
+        gl::Uniform4fv(loc, 1, self.as_ptr());
     }
 }
 
 impl SendUniform for glm::Mat3 {
     unsafe fn uniform(&self, loc: GLint) {
-        gl::UniformMatrix3fv(loc, 1, gl::FALSE, self.as_ptr()); 
+        gl::UniformMatrix3fv(loc, 1, gl::FALSE, self.as_ptr());
     }
 }
 
 impl SendUniform for glm::Mat4 {
     unsafe fn uniform(&self, loc: GLint) {
-        gl::UniformMatrix4fv(loc, 1, gl::FALSE, self.as_ptr()); 
+        gl::UniformMatrix4fv(loc, 1, gl::FALSE, self.as_ptr());
     }
 }
-
-
-

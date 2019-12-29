@@ -1,11 +1,11 @@
-extern crate sdl2;
+extern crate bitflags;
 extern crate gl;
 extern crate nalgebra_glm;
-extern crate bitflags;
+extern crate sdl2;
 
 use sdl2::event::Event;
-use sdl2::keyboard::{Keycode};
-use std::time::{SystemTime, Duration};
+use sdl2::keyboard::Keycode;
+use std::time::{Duration, SystemTime};
 
 pub mod interface;
 pub mod render_gl;
@@ -14,16 +14,15 @@ pub mod render_text;
 pub mod primitives;
 #[macro_use]
 pub mod widgets;
-pub mod graph_mode;
 #[macro_use]
 pub mod textedit;
-use interface::{AppState};
-use primitives::{*};
+use interface::AppState;
+use primitives::*;
 
 fn main() {
     let sdl = sdl2::init().unwrap();
     let video_subsystem = sdl.video().unwrap();
-    const VIEWPORT: Point = Point{x:640., y:480.};
+    const VIEWPORT: Point = Point { x: 640., y: 480. };
     let window = video_subsystem
         .window("Markdown App", VIEWPORT.x as u32, VIEWPORT.y as u32)
         .opengl()
@@ -34,8 +33,9 @@ fn main() {
     let gl_attr = video_subsystem.gl_attr();
     let _gl_context = window.gl_create_context().unwrap();
     gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
-    gl_attr.set_context_version(4,2);
-    let _gl = gl::load_with(|s| video_subsystem.gl_get_proc_address(s) as *const std::os::raw::c_void);
+    gl_attr.set_context_version(4, 2);
+    let _gl =
+        gl::load_with(|s| video_subsystem.gl_get_proc_address(s) as *const std::os::raw::c_void);
 
     let bg_color = rgb_to_f32(128, 128, 128);
     unsafe {
@@ -51,24 +51,27 @@ fn main() {
     let mut timer = SystemTime::now();
 
     const FPS: u64 = 120;
-    /*unsafe { 
-        gl::Clear(gl::COLOR_BUFFER_BIT); 
+    /*unsafe {
+        gl::Clear(gl::COLOR_BUFFER_BIT);
     }*/
     'main: loop {
         for event in event_pump.poll_iter() {
             let kmod = sdl.keyboard().mod_state();
             match event {
-                Event::Quit {..} | 
-                Event::KeyDown { keycode: Some(Keycode::Escape), ..} => break 'main,
-                ev @ Event::MouseMotion{..} | 
-                ev @ Event::MouseButtonDown{..} | 
-                ev @ Event::MouseButtonUp{..} => { 
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => break 'main,
+                ev @ Event::MouseMotion { .. }
+                | ev @ Event::MouseButtonDown { .. }
+                | ev @ Event::MouseButtonUp { .. } => {
                     app_state.handle_mouse_event(&ev, &kmod);
                 }
-                ev @ Event::KeyDown {..} => {
+                ev @ Event::KeyDown { .. } => {
                     app_state.handle_keyboard_event(&ev);
                 }
-                _ => {},
+                _ => {}
             }
         }
         if timer.elapsed().unwrap() >= Duration::from_millis(1000 / FPS) {

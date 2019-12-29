@@ -1,57 +1,63 @@
-use gl::types::{GLuint, GLint, GLfloat, GLenum, GLvoid, GLsizeiptr};
+use gl::types::{GLenum, GLfloat, GLint, GLsizeiptr, GLuint, GLvoid};
 extern crate gl;
+extern crate macro_attr;
 extern crate nalgebra_glm;
 extern crate newtype_derive;
-extern crate macro_attr;
-use nalgebra_glm as glm;
-use std::collections::HashMap;
-use std::ffi::CString;
-use std::f32::{self, consts::PI};
-use PrimType as PT;
-use crate::render_gl::{Shader, Program, SendUniforms, SendUniform};
-use crate::render_text::{RenderText};
-use md_ui_derive::SendUniforms;
+use crate::render_gl::{Program, SendUniform, SendUniforms, Shader};
+use crate::render_text::RenderText;
 use macro_attr::{macro_attr, macro_attr_impl};
+use md_ui_derive::SendUniforms;
+use nalgebra_glm as glm;
 use newtype_derive::*;
-use std::rc::Rc;
 use std::cell::RefCell;
-
+use std::collections::HashMap;
+use std::f32::{self, consts::PI};
+use std::ffi::CString;
+use std::rc::Rc;
+use PrimType as PT;
 
 type PrimMap = HashMap<PrimType, GLuint>;
 type ProgMap = HashMap<PrimType, Rc<Program>>;
 
 pub fn prim_map() -> PrimMap {
     let mut m = HashMap::new();
-    for prim in &[PT::Triangle, PT::Circle, PT::Rect, PT::Ring, PT::Line, PT::HexColor] {
+    for prim in &[
+        PT::Triangle,
+        PT::Circle,
+        PT::Rect,
+        PT::Ring,
+        PT::Line,
+        PT::HexColor,
+    ] {
         m.insert(*prim, prim.buffer_data());
     }
     m
 }
 
 pub fn prog_map() -> ProgMap {
-    let vert_shader = Shader::from_vert_source(
-        &CString::new(include_str!("shaders/shape2d.vert")).unwrap()
-    ).unwrap();
+    let vert_shader =
+        Shader::from_vert_source(&CString::new(include_str!("shaders/shape2d.vert")).unwrap())
+            .unwrap();
 
-    let frag_shader = Shader::from_frag_source(
-        &CString::new(include_str!("shaders/shape2d.frag")).unwrap()
-    ).unwrap();
+    let frag_shader =
+        Shader::from_frag_source(&CString::new(include_str!("shaders/shape2d.frag")).unwrap())
+            .unwrap();
 
-    let line_shader = Shader::from_vert_source(
-        &CString::new(include_str!("shaders/line.vert")).unwrap()
-    ).unwrap();
+    let line_shader =
+        Shader::from_vert_source(&CString::new(include_str!("shaders/line.vert")).unwrap())
+            .unwrap();
 
-    let line_geom_shader = Shader::from_geom_source(
-        &CString::new(include_str!("shaders/line.geom")).unwrap()
-    ).unwrap();
+    let line_geom_shader =
+        Shader::from_geom_source(&CString::new(include_str!("shaders/line.geom")).unwrap())
+            .unwrap();
 
-    let shapecolor_vert = Shader::from_vert_source(
-        &CString::new(include_str!("shaders/shapecolor.vert")).unwrap()
-    ).unwrap();
+    let shapecolor_vert =
+        Shader::from_vert_source(&CString::new(include_str!("shaders/shapecolor.vert")).unwrap())
+            .unwrap();
 
-    let shapecolor_frag = Shader::from_frag_source(
-        &CString::new(include_str!("shaders/shapecolor.frag")).unwrap()
-    ).unwrap();
+    let shapecolor_frag =
+        Shader::from_frag_source(&CString::new(include_str!("shaders/shapecolor.frag")).unwrap())
+            .unwrap();
 
     let mut shaders = vec![vert_shader, frag_shader];
     let shape_prog = Rc::new(Program::from_shaders(shaders.as_ref()).unwrap());
@@ -88,46 +94,46 @@ const NCIRCLE_VERTS: usize = 30;
 impl PrimType {
     fn verts(&self) -> Vec<f32> {
         match self {
-            PT::Triangle => { //isosceles
-                vec![
-                    0., 1.0,
-                    1.0, 1.0,
-                    0.5, 0.
-                ]
-            },
+            PT::Triangle => {
+                //isosceles
+                vec![0., 1.0, 1.0, 1.0, 0.5, 0.]
+            }
             PT::Circle => {
                 let mut v = vec![0.5, 0.5];
                 v.extend(PT::Ring.verts());
                 v
-            },
+            }
             PT::Ring => {
                 let n = NCIRCLE_VERTS as f32;
-                (0..NCIRCLE_VERTS).map(|i| 
-                    vec![0.5 + 0.5 * f32::cos(2.*PI*i as f32 / (n-1.)), 
-                         0.5 + 0.5 * f32::sin(2.*PI*i as f32 / (n-1.))]
-                ).flatten().collect()
+                (0..NCIRCLE_VERTS)
+                    .map(|i| {
+                        vec![
+                            0.5 + 0.5 * f32::cos(2. * PI * i as f32 / (n - 1.)),
+                            0.5 + 0.5 * f32::sin(2. * PI * i as f32 / (n - 1.)),
+                        ]
+                    })
+                    .flatten()
+                    .collect()
             }
-            PT::Rect => {
-               vec![ 
-                    0.0, 0.0,
-                    1.0, 0.0, 
-                    1.0, 1.0,
-                    0.0, 1.0
-                ]
-            },
-            PT::Line => {
-               vec![0.0, 0.0]
-            }
+            PT::Rect => vec![0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0],
+            PT::Line => vec![0.0, 0.0],
             PT::HexColor => {
-                let colors = &[
-                    [255., 0., 0.],
-                    [0., 255., 0.],
-                    [0., 0., 255.],
-                ];
-                PT::Triangle.verts().chunks(2).enumerate().map(|(i, c)|
-                    vec![c[0], c[1],
-                    colors[i][0] / 255., colors[i][1] / 255., colors[i][2] / 255.]
-                ).flatten().collect()
+                let colors = &[[255., 0., 0.], [0., 255., 0.], [0., 0., 255.]];
+                PT::Triangle
+                    .verts()
+                    .chunks(2)
+                    .enumerate()
+                    .map(|(i, c)| {
+                        vec![
+                            c[0],
+                            c[1],
+                            colors[i][0] / 255.,
+                            colors[i][1] / 255.,
+                            colors[i][2] / 255.,
+                        ]
+                    })
+                    .flatten()
+                    .collect()
             }
         }
     }
@@ -135,7 +141,7 @@ impl PrimType {
         unsafe {
             match self {
                 //PT::HexColor => { HexColor::buffer_verts(&self.verts().as_slice()) }
-                _ => buffer_verts(&self.verts().as_slice()) 
+                _ => buffer_verts(&self.verts().as_slice()),
             }
         }
     }
@@ -144,35 +150,27 @@ impl PrimType {
             PT::Triangle => gl::TRIANGLES,
             PT::Rect => gl::QUADS,
             PT::Circle => gl::TRIANGLE_FAN,
-            PT::Ring => gl::LINE_STRIP, 
+            PT::Ring => gl::LINE_STRIP,
             PT::Line => gl::POINTS,
-            PT::HexColor=> gl::TRIANGLES,
+            PT::HexColor => gl::TRIANGLES,
         }
     }
     pub fn size(&self) -> usize {
         match self {
             PT::Triangle => 3,
             PT::Rect => 4,
-            PT::Circle => NCIRCLE_VERTS + 1, 
-            PT::Ring => NCIRCLE_VERTS, 
+            PT::Circle => NCIRCLE_VERTS + 1,
+            PT::Ring => NCIRCLE_VERTS,
             PT::Line => 1,
-            PT::HexColor => 3 
+            PT::HexColor => 3,
         }
     }
     fn in_bounds(&self, p: &Point) -> bool {
         match self {
-            PT::Triangle => {
-                p.x >= 0.0 && p.x <= 1.0 && p.y >= f32::abs(p.x - 0.5) && p.y <= 1.0
-            }
-            PT::Circle | PT::Ring | PT::HexColor => {
-                (*p - Point{x: 0.5, y: 0.5}).mag() <= 0.5
-            }
-            PT::Rect => {
-                p.x >= 0.0 && p.x <= 1.0 && p.y >= 0.0 && p.y <= 1.0 
-            }
-            PT::Line => {
-                false
-            }
+            PT::Triangle => p.x >= 0.0 && p.x <= 1.0 && p.y >= f32::abs(p.x - 0.5) && p.y <= 1.0,
+            PT::Circle | PT::Ring | PT::HexColor => (*p - Point { x: 0.5, y: 0.5 }).mag() <= 0.5,
+            PT::Rect => p.x >= 0.0 && p.x <= 1.0 && p.y >= 0.0 && p.y <= 1.0,
+            PT::Line => false,
         }
     }
 }
@@ -182,10 +180,11 @@ unsafe fn buffer_verts(verts: &[f32]) -> GLuint {
     let mut vbo: GLuint = 0;
     gl::GenBuffers(1, &mut vbo);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-    gl::BufferData(gl::ARRAY_BUFFER,
+    gl::BufferData(
+        gl::ARRAY_BUFFER,
         (verts.len() * std::mem::size_of::<f32>()) as GLsizeiptr,
         verts.as_ptr() as *const GLvoid,
-        gl::STATIC_DRAW
+        gl::STATIC_DRAW,
     );
     gl::BindBuffer(gl::ARRAY_BUFFER, 0);
 
@@ -193,9 +192,14 @@ unsafe fn buffer_verts(verts: &[f32]) -> GLuint {
     gl::BindVertexArray(vao);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
     gl::EnableVertexAttribArray(0);
-    gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE,
+    gl::VertexAttribPointer(
+        0,
+        2,
+        gl::FLOAT,
+        gl::FALSE,
         (2 * std::mem::size_of::<f32>()) as GLint,
-        std::ptr::null());
+        std::ptr::null(),
+    );
     gl::BindBuffer(gl::ARRAY_BUFFER, 0);
     gl::BindVertexArray(0);
     vao
@@ -204,31 +208,34 @@ unsafe fn buffer_verts(verts: &[f32]) -> GLuint {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
     pub x: f32,
-    pub y: f32
+    pub y: f32,
 }
 
 impl From<glm::Vec4> for Point {
     fn from(v: glm::Vec4) -> Point {
-        Point {x: v[0], y: v[1]}
+        Point { x: v[0], y: v[1] }
     }
 }
 
 impl From<glm::TVec2<i32>> for Point {
     fn from(v: glm::TVec2<i32>) -> Point {
-        Point {x: v[0] as f32, y: v[1] as f32}
+        Point {
+            x: v[0] as f32,
+            y: v[1] as f32,
+        }
     }
 }
 
 #[allow(dead_code)]
 impl Point {
     pub fn origin() -> Point {
-        Point::new(0.,0.)
+        Point::new(0., 0.)
     }
     pub fn new(x: f32, y: f32) -> Point {
-        Point {x, y}
+        Point { x, y }
     }
     pub fn mag(&self) -> f32 {
-        f32::sqrt((self.x*self.x + self.y*self.y) as f32)
+        f32::sqrt((self.x * self.x + self.y * self.y) as f32)
     }
     pub fn dist(&self, p2: &Point) -> f32 {
         let d = *self - *p2;
@@ -248,7 +255,10 @@ impl Point {
 impl std::ops::Add for Point {
     type Output = Point;
     fn add(self, other: Point) -> Self::Output {
-        Point {x:self.x + other.x, y: self.y + other.y}
+        Point {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
     }
 }
 
@@ -262,7 +272,10 @@ impl std::ops::AddAssign for Point {
 impl std::ops::Neg for Point {
     type Output = Point;
     fn neg(self) -> Self::Output {
-        Point {x: -self.x, y: -self.y}
+        Point {
+            x: -self.x,
+            y: -self.y,
+        }
     }
 }
 
@@ -283,7 +296,10 @@ impl std::ops::SubAssign for Point {
 impl std::ops::Mul for Point {
     type Output = Point;
     fn mul(self, other: Point) -> Self::Output {
-        Point {x: self.x*other.x, y: self.y * other.y}
+        Point {
+            x: self.x * other.x,
+            y: self.y * other.y,
+        }
     }
 }
 
@@ -297,14 +313,20 @@ impl std::ops::MulAssign for Point {
 impl std::ops::Div<f32> for Point {
     type Output = Point;
     fn div(self, rhs: f32) -> Self {
-        Point {x: self.x / rhs, y: self.y / rhs}
+        Point {
+            x: self.x / rhs,
+            y: self.y / rhs,
+        }
     }
 }
 
 impl std::ops::Div<Point> for Point {
     type Output = Point;
     fn div(self, rhs: Point) -> Self {
-        Point {x: self.x / rhs.x, y: self.y / rhs.y}
+        Point {
+            x: self.x / rhs.x,
+            y: self.y / rhs.y,
+        }
     }
 }
 
@@ -327,15 +349,25 @@ pub struct RotateRect {
     pub offset: Point,
     pub size: Point,
     pub rot: Radians,
-    pub trans: TransformCache<(Point, Point, Radians), RectTransform>
+    pub trans: TransformCache<(Point, Point, Radians), RectTransform>,
 }
 
 impl RotateRect {
     pub fn new(offset: Point, size: Point, rot: Radians) -> Self {
-        RotateRect { offset, size, rot, trans: TransformCache::new() }
+        RotateRect {
+            offset,
+            size,
+            rot,
+            trans: TransformCache::new(),
+        }
     }
     pub fn from_rect(rect: Rect, rot: Radians) -> Self {
-        RotateRect { offset: rect.c1, size: Point::new(rect.width(), rect.height()), rot, trans: TransformCache::new() }
+        RotateRect {
+            offset: rect.c1,
+            size: Point::new(rect.width(), rect.height()),
+            rot,
+            trans: TransformCache::new(),
+        }
     }
     pub fn to_rect(&self) -> Rect {
         Rect::new(Point::origin(), self.size)
@@ -344,7 +376,10 @@ impl RotateRect {
         self.offset += *offset;
     }
     pub fn center(&self, vp: &Point) -> Point {
-        self.verts(vp).iter().fold(Point::origin(), |acc, curr| { acc + *curr }) / 4.
+        self.verts(vp)
+            .iter()
+            .fold(Point::origin(), |acc, curr| acc + *curr)
+            / 4.
     }
     pub fn set_radians(&mut self, mut radians: Radians) {
         radians.0 -= 2. * PI * (radians.0 / 2. / PI).floor();
@@ -367,27 +402,35 @@ impl RotateRect {
         self.set_size(&(model_rect.size() * self.size));
         self.set_corner(&corner, vp);
     }
-    pub fn verts(&self, vp: &Point) -> Vec<Point>  {
+    pub fn verts(&self, vp: &Point) -> Vec<Point> {
         let trans = self.transform(vp);
-        let v = PrimType::Rect.verts().chunks(2).map(|s| { 
-            trans.model_to_pixel(&glm::vec4(s[0], s[1], 0.0, 1.0))
-        }).collect();
+        let v = PrimType::Rect
+            .verts()
+            .chunks(2)
+            .map(|s| trans.model_to_pixel(&glm::vec4(s[0], s[1], 0.0, 1.0)))
+            .collect();
         v
     }
     pub fn in_bounds(&self, p: &Point, vp: &Point) -> bool {
         PrimType::Rect.in_bounds(&self.transform(vp).pixel_to_model(p).into())
     }
     pub fn builder(&self) -> ShapeBuilder {
-        ShapeBuilder { p: self.to_poly(), ..ShapeBuilder::new() }
+        ShapeBuilder {
+            p: self.to_poly(),
+            ..ShapeBuilder::new()
+        }
     }
     pub fn transform(&self, vp: &Point) -> RectTransform {
         self.trans.transform(
             (self.offset, self.size, self.rot),
-            Box::new(move || RectTransform::new(self, vp)))
+            Box::new(move || RectTransform::new(self, vp)),
+        )
     }
     pub fn to_poly(&self) -> DrawPolygon {
         DrawPolygon {
-            prim: PrimType::Rect, rect: self.clone(), ..DrawPolygon::default() 
+            prim: PrimType::Rect,
+            rect: self.clone(),
+            ..DrawPolygon::default()
         }
     }
 }
@@ -396,16 +439,18 @@ impl Default for RotateRect {
     fn default() -> Self {
         RotateRect {
             offset: Point::origin(),
-            size: Point::new(5.,5.),
+            size: Point::new(5., 5.),
             rot: Radians(0.),
-            trans: TransformCache::new() 
+            trans: TransformCache::new(),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct Line {
-    a: f32, b: f32, c: f32 
+    a: f32,
+    b: f32,
+    c: f32,
 }
 
 #[allow(dead_code)]
@@ -419,11 +464,16 @@ impl Line {
         let a = p1.y - p2.y;
         let b = p2.x - p1.x;
         Line {
-            a, b, c: -(a * p1.x + b * p1.y)
+            a,
+            b,
+            c: -(a * p1.x + b * p1.y),
         }
     }
     fn from_pt_slope(p: &Point, l: Line) -> Line {
-        Line { c: -(l.a * p.x + l.b * p.y), ..l }
+        Line {
+            c: -(l.a * p.x + l.b * p.y),
+            ..l
+        }
     }
     fn intersect(&self, l2: &Line) -> Option<Point> {
         let zn = det(self.a, self.b, l2.a, l2.b);
@@ -432,35 +482,51 @@ impl Line {
         }
         Some(Point {
             x: -det(self.c, self.b, l2.c, l2.b) / zn,
-            y: -det(self.a, self.c, l2.a, l2.c) / zn
+            y: -det(self.a, self.c, l2.a, l2.c) / zn,
         })
     }
     fn dist_to_pt(&self, p: &Point) -> f32 {
-        let (a,b,c) = (self.a, self.b, self.c);
-        f32::abs(a*p.x + b*p.y + c) / f32::sqrt(a*a + b*b)
+        let (a, b, c) = (self.a, self.b, self.c);
+        f32::abs(a * p.x + b * p.y + c) / f32::sqrt(a * a + b * b)
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct DrawLine {
-    pub p1: Point, 
+    pub p1: Point,
     pub p2: Point,
     pub line_width: f32,
-    pub color: glm::Vec4
+    pub color: glm::Vec4,
 }
 
 impl DrawLine {
     pub fn min_x(&mut self) -> &mut f32 {
-        if self.p1.x < self.p2.x { &mut self.p1.x } else { &mut self.p2.x }
+        if self.p1.x < self.p2.x {
+            &mut self.p1.x
+        } else {
+            &mut self.p2.x
+        }
     }
     pub fn max_x(&mut self) -> &mut f32 {
-        if self.p1.x > self.p2.x { &mut self.p1.x } else { &mut self.p2.x }
+        if self.p1.x > self.p2.x {
+            &mut self.p1.x
+        } else {
+            &mut self.p2.x
+        }
     }
     pub fn min_y(&mut self) -> &mut f32 {
-        if self.p1.y < self.p2.y { &mut self.p1.y } else { &mut self.p2.y }
+        if self.p1.y < self.p2.y {
+            &mut self.p1.y
+        } else {
+            &mut self.p2.y
+        }
     }
     pub fn max_y(&mut self) -> &mut f32 {
-        if self.p1.y > self.p2.y { &mut self.p1.y } else { &mut self.p2.y }
+        if self.p1.y > self.p2.y {
+            &mut self.p1.y
+        } else {
+            &mut self.p2.y
+        }
     }
     pub fn draw(&self, ctx: &DrawCtx) {
         let ptype = &PrimType::Line;
@@ -468,7 +534,7 @@ impl DrawLine {
         let trans = LineTransform::new(self, &ctx.viewport);
         let prog_id = ctx.prog_map[&ptype].id();
         let vao = ctx.prim_map[&ptype];
-        let line_width = self.line_width; 
+        let line_width = self.line_width;
         unsafe {
             trans.send_uniforms(prog_id).unwrap();
             self.color.send_uniform(prog_id, "color").unwrap();
@@ -485,7 +551,7 @@ impl Default for DrawLine {
             p1: Point::origin(),
             p2: Point::origin(),
             line_width: 3.,
-            color: glm::vec4(0., 0., 0., 1.)
+            color: glm::vec4(0., 0., 0., 1.),
         }
     }
 }
@@ -495,7 +561,7 @@ pub struct DrawPolygon {
     pub prim: PrimType,
     pub fill: bool,
     pub rect: RotateRect,
-    pub color: glm::Vec4
+    pub color: glm::Vec4,
 }
 
 impl Default for DrawPolygon {
@@ -504,7 +570,7 @@ impl Default for DrawPolygon {
             prim: PT::Triangle,
             rect: RotateRect::default(),
             fill: true,
-            color: glm::vec4(0., 0., 0., 1.)
+            color: glm::vec4(0., 0., 0., 1.),
         }
     }
 }
@@ -518,9 +584,12 @@ impl DrawPolygon {
     }
     pub fn verts(&self, vp: &Point) -> Vec<Point> {
         let trans = self.rect.transform(vp);
-        let v = self.prim.verts().chunks(2).map(|s| { 
-            trans.model_to_pixel(&glm::vec4(s[0], s[1], 0.0, 1.0))
-        }).collect();
+        let v = self
+            .prim
+            .verts()
+            .chunks(2)
+            .map(|s| trans.model_to_pixel(&glm::vec4(s[0], s[1], 0.0, 1.0)))
+            .collect();
         v
     }
     pub fn draw(&self, ctx: &DrawCtx) {
@@ -531,7 +600,7 @@ impl DrawPolygon {
         let vao = ctx.prim_map[ptype];
         let poly_mode: GLuint = if self.fill { gl::FILL } else { gl::LINE };
         unsafe {
-            gl::PolygonMode(gl::FRONT_AND_BACK, poly_mode); 
+            gl::PolygonMode(gl::FRONT_AND_BACK, poly_mode);
             gl::LineWidth(1.);
             trans.send_uniforms(prog_id).unwrap();
             self.color.send_uniform(prog_id, "color").unwrap();
@@ -548,15 +617,21 @@ pub struct TransformCache<C: PartialEq + Clone, T: SendUniforms + PartialEq + Cl
 
 impl<C: PartialEq + Clone, T: SendUniforms + PartialEq + Clone> TransformCache<C, T> {
     pub fn new() -> TransformCache<C, T> {
-        TransformCache { trans: RefCell::new(None) }
+        TransformCache {
+            trans: RefCell::new(None),
+        }
     }
     pub fn transform<U: FnOnce() -> T>(&self, key: C, create: U) -> T {
         let trans = {
             if let Some((cache, tr)) = self.trans.replace(None) {
-                if key != cache { create() }
-                else { tr }
+                if key != cache {
+                    create()
+                } else {
+                    tr
+                }
+            } else {
+                create()
             }
-            else { create() }
         };
         self.trans.replace(Some((key.clone(), trans.clone())));
         trans
@@ -568,7 +643,7 @@ pub struct RectTransform {
     pub projection: glm::Mat4,
     pub model: glm::Mat4,
 }
-    
+
 #[allow(dead_code)]
 impl RectTransform {
     pub fn new(r: &RotateRect, vp: &Point) -> Self {
@@ -580,7 +655,7 @@ impl RectTransform {
         model = glm::translate(&model, &(-r.size / 2.).to_vec3());
 
         model = glm::scale(&model, &glm::vec3(r.size.x, r.size.y, 1.));
-        RectTransform {projection, model}
+        RectTransform { projection, model }
     }
     fn get(&self) -> glm::Mat4 {
         self.projection * self.model
@@ -589,7 +664,7 @@ impl RectTransform {
         self.get() * coords
     }
     pub fn pixel_to_model(&self, pt: &Point) -> glm::Vec4 {
-        glm::inverse(&self.model) * pt.to_vec4() 
+        glm::inverse(&self.model) * pt.to_vec4()
     }
     pub fn model_to_pixel(&self, coords: &glm::Vec4) -> Point {
         (self.model * coords).into()
@@ -601,7 +676,9 @@ impl RectTransform {
 
 #[derive(SendUniforms)]
 struct LineTransform {
-    point1: glm::Vec2, point2: glm::Vec2, projection: glm::Mat4
+    point1: glm::Vec2,
+    point2: glm::Vec2,
+    projection: glm::Mat4,
 }
 
 impl LineTransform {
@@ -609,7 +686,7 @@ impl LineTransform {
         LineTransform {
             point1: l.p1.to_vec2(),
             point2: l.p2.to_vec2(),
-            projection: glm::ortho(0., vp.x, vp.y, 0., -1., 1.)
+            projection: glm::ortho(0., vp.x, vp.y, 0., -1., 1.),
         }
     }
 }
@@ -621,12 +698,16 @@ pub trait InBounds {
 #[derive(Clone, Debug)]
 pub struct Rect {
     //upper left corner, lower right corner
-    pub c1: Point, pub c2: Point
+    pub c1: Point,
+    pub c2: Point,
 }
 
 impl Default for Rect {
     fn default() -> Self {
-        Rect { c1: Point{x:0.,y:0.}, c2: Point{x:1., y:1.} }
+        Rect {
+            c1: Point { x: 0., y: 0. },
+            c2: Point { x: 1., y: 1. },
+        }
     }
 }
 
@@ -639,18 +720,36 @@ impl Rect {
         Rect::bounding_box(&[c1, c2])
     }
     pub fn bounding_box(pts: &[Point]) -> Self {
-        if pts.is_empty() { return Rect{c1: Point::origin(), c2: Point::origin()} }
-        let mut min_pt = pts[0]; let mut max_pt = min_pt;
-        for p in pts {
-            if p.x < min_pt.x { min_pt.x = p.x };
-            if p.x > max_pt.x { max_pt.x = p.x };
-            if p.y < min_pt.y { min_pt.y = p.y };
-            if p.y > max_pt.y { max_pt.y = p.y };
+        if pts.is_empty() {
+            return Rect {
+                c1: Point::origin(),
+                c2: Point::origin(),
+            };
         }
-        Rect {c1: min_pt, c2: max_pt}
+        let mut min_pt = pts[0];
+        let mut max_pt = min_pt;
+        for p in pts {
+            if p.x < min_pt.x {
+                min_pt.x = p.x
+            };
+            if p.x > max_pt.x {
+                max_pt.x = p.x
+            };
+            if p.y < min_pt.y {
+                min_pt.y = p.y
+            };
+            if p.y > max_pt.y {
+                max_pt.y = p.y
+            };
+        }
+        Rect {
+            c1: min_pt,
+            c2: max_pt,
+        }
     }
     pub fn builder(&self) -> ShapeBuilder {
-        ShapeBuilder::new().rect(self.width() as u32, self.height() as u32)
+        ShapeBuilder::new()
+            .rect(self.width() as u32, self.height() as u32)
             .offset(self.c1.x as i32, self.c1.y as i32)
     }
     pub fn center(&self) -> Point {
@@ -666,28 +765,43 @@ impl Rect {
         Point::new(self.width(), self.height())
     }
     pub fn verts(&self) -> Vec<Point> {
-        vec![self.c1, 
-             self.ur(),
-             self.c2,
-             self.bl()] //clockwise
+        vec![self.c1, self.ur(), self.c2, self.bl()] //clockwise
     }
     pub fn ur(&self) -> Point {
-        Point{x: *self.max_x(), y: *self.min_y()}
+        Point {
+            x: *self.max_x(),
+            y: *self.min_y(),
+        }
     }
     pub fn bl(&self) -> Point {
-        Point{x: *self.min_x(), y: *self.max_y()}
+        Point {
+            x: *self.min_x(),
+            y: *self.max_y(),
+        }
     }
     pub fn left_center(&self) -> Point {
-        Point {x: *self.min_x(), y: (self.min_y() + self.max_y()) / 2. }
+        Point {
+            x: *self.min_x(),
+            y: (self.min_y() + self.max_y()) / 2.,
+        }
     }
     pub fn top_center(&self) -> Point {
-        Point {x: (self.min_x() + self.max_x()) / 2., y: *self.min_y() }
+        Point {
+            x: (self.min_x() + self.max_x()) / 2.,
+            y: *self.min_y(),
+        }
     }
     pub fn right_center(&self) -> Point {
-        Point {x: *self.max_x(), y: (self.min_y() + self.max_y()) / 2. }
+        Point {
+            x: *self.max_x(),
+            y: (self.min_y() + self.max_y()) / 2.,
+        }
     }
     pub fn bot_center(&self) -> Point {
-        Point {x: (self.min_x() + self.max_x()) / 2., y: *self.max_y() }
+        Point {
+            x: (self.min_x() + self.max_x()) / 2.,
+            y: *self.max_y(),
+        }
     }
     pub fn min_x(&self) -> &f32 {
         &self.c1.x
@@ -710,10 +824,26 @@ impl Rect {
 
 impl InBounds for Rect {
     fn in_bounds(&self, p: &Point, _: &Point) -> bool {
-        let min_x = if self.c1.x < self.c2.x { &self.c1.x } else { &self.c2.x };
-        let max_x = if self.c1.x < self.c2.x { &self.c2.x } else { &self.c1.x };
-        let min_y = if self.c1.y < self.c2.y { &self.c1.y } else { &self.c2.y };
-        let max_y = if self.c1.y < self.c2.y { &self.c2.y } else { &self.c1.y };
+        let min_x = if self.c1.x < self.c2.x {
+            &self.c1.x
+        } else {
+            &self.c2.x
+        };
+        let max_x = if self.c1.x < self.c2.x {
+            &self.c2.x
+        } else {
+            &self.c1.x
+        };
+        let min_y = if self.c1.y < self.c2.y {
+            &self.c1.y
+        } else {
+            &self.c2.y
+        };
+        let max_y = if self.c1.y < self.c2.y {
+            &self.c2.y
+        } else {
+            &self.c1.y
+        };
         p.x >= *min_x && p.x <= *max_x && p.y >= *min_y && p.y <= *max_y
     }
 }
@@ -726,7 +856,7 @@ impl InBounds for DrawPolygon {
 }
 
 impl InBounds for DrawLine {
-     fn in_bounds(&self, p: &Point, vp: &Point) -> bool {
+    fn in_bounds(&self, p: &Point, vp: &Point) -> bool {
         let mut c1 = self.p1;
         let mut c2 = self.p2;
         if c1.x == c2.x {
@@ -737,8 +867,8 @@ impl InBounds for DrawLine {
             c1.y -= self.line_width / 2.;
             c2.y += self.line_width / 2.;
         }
-        if !(Rect {c1, c2}).in_bounds(p, vp) {
-            return false
+        if !(Rect { c1, c2 }).in_bounds(p, vp) {
+            return false;
         }
         let l = Line::from_pts(self.p1, self.p2);
         let dst = l.dist_to_pt(p);
@@ -749,38 +879,40 @@ impl InBounds for DrawLine {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
     Line(DrawLine),
-    Polygon(DrawPolygon)
+    Polygon(DrawPolygon),
 }
 
 impl Shape {
     pub fn verts(&self, vp: &Point) -> Vec<Point> {
         match self {
-            Shape::Polygon(ref draw_poly) => {
-                draw_poly.verts(vp)
-            }
-            Shape::Line(draw_line) => {
-                vec![draw_line.p1, draw_line.p2]
-            }
+            Shape::Polygon(ref draw_poly) => draw_poly.verts(vp),
+            Shape::Line(draw_line) => vec![draw_line.p1, draw_line.p2],
         }
     }
     pub fn rect(&self) -> RotateRect {
         match self {
             Shape::Polygon(ref draw_poly) => draw_poly.rect.clone(),
-            Shape::Line(ref draw_line) => RotateRect::from_rect(Rect::new(draw_line.p1, draw_line.p2), Radians(0.))
+            Shape::Line(ref draw_line) => {
+                RotateRect::from_rect(Rect::new(draw_line.p1, draw_line.p2), Radians(0.))
+            }
         }
     }
     pub fn rect2(&self) -> Rect {
         match self {
             Shape::Polygon(ref draw_poly) => draw_poly.rect.to_rect(),
-            Shape::Line(ref draw_line) => Rect::new(draw_line.p1, draw_line.p2)
+            Shape::Line(ref draw_line) => Rect::new(draw_line.p1, draw_line.p2),
         }
     }
     pub fn set_fill(&mut self, fill: bool) {
         match self {
             Shape::Polygon(ref mut draw_poly) => {
-                draw_poly.prim = if draw_poly.prim == PrimType::Circle && !fill { PrimType::Ring } 
-                else if draw_poly.prim == PrimType::Ring && fill { PrimType::Circle }
-                else { draw_poly.prim };
+                draw_poly.prim = if draw_poly.prim == PrimType::Circle && !fill {
+                    PrimType::Ring
+                } else if draw_poly.prim == PrimType::Ring && fill {
+                    PrimType::Circle
+                } else {
+                    draw_poly.prim
+                };
                 draw_poly.fill = fill;
             }
             _ => {}
@@ -789,25 +921,31 @@ impl Shape {
     pub fn draw(&self, ctx: &DrawCtx) {
         match self {
             Shape::Polygon(draw_poly) => draw_poly.draw(ctx),
-            Shape::Line(draw_line) => draw_line.draw(ctx)
+            Shape::Line(draw_line) => draw_line.draw(ctx),
         }
     }
     pub fn rgb(&self) -> (u8, u8, u8) {
         let color = match self {
             Shape::Polygon(draw_poly) => draw_poly.color,
-            Shape::Line(draw_line) => draw_line.color
+            Shape::Line(draw_line) => draw_line.color,
         };
-        ((color[0] * 255.) as u8, (color[1] * 255.) as u8, (color[2] * 255.) as u8)
+        (
+            (color[0] * 255.) as u8,
+            (color[1] * 255.) as u8,
+            (color[2] * 255.) as u8,
+        )
     }
 }
 
 pub struct ShapeCache {
-    cache: RefCell<(Point, Shape)>
+    cache: RefCell<(Point, Shape)>,
 }
 
 impl ShapeCache {
     pub fn new(s: Shape) -> Self {
-        ShapeCache { cache: RefCell::new((Point::origin(), s))}
+        ShapeCache {
+            cache: RefCell::new((Point::origin(), s)),
+        }
     }
     pub fn draw(&self, offset: Point, ctx: &DrawCtx) {
         let mut c = self.cache.borrow_mut();
@@ -819,7 +957,7 @@ impl ShapeCache {
                     draw_line.p2 += offset;
                 }
                 Shape::Polygon(ref mut draw_poly) => {
-                     draw_poly.rect.offset = offset;
+                    draw_poly.rect.offset = offset;
                 }
             }
         }
@@ -836,15 +974,10 @@ impl ShapeCache {
 impl InBounds for Shape {
     fn in_bounds(&self, p: &Point, vp: &Point) -> bool {
         match self {
-            Shape::Polygon(draw_poly) => draw_poly.in_bounds(p,vp),
-            Shape::Line(draw_line) => draw_line.in_bounds(p,vp)
+            Shape::Polygon(draw_poly) => draw_poly.in_bounds(p, vp),
+            Shape::Line(draw_line) => draw_line.in_bounds(p, vp),
         }
     }
-}
-
-pub enum DrawMode {
-    Canvas,
-    Graph
 }
 
 pub struct DrawCtx {
@@ -852,51 +985,116 @@ pub struct DrawCtx {
     pub prog_map: ProgMap,
     pub viewport: Point,
     pub render_text: RenderText,
-    pub draw_mode: DrawMode,
 }
 
 impl DrawCtx {
     pub fn new(viewport: &Point) -> DrawCtx {
-        DrawCtx { prim_map: prim_map(), prog_map: prog_map(), viewport: *viewport, render_text: RenderText::new().unwrap(), 
-                draw_mode: DrawMode::Canvas }
+        DrawCtx {
+            prim_map: prim_map(),
+            prog_map: prog_map(),
+            viewport: *viewport,
+            render_text: RenderText::new().unwrap(),
+        }
     }
     #[allow(dead_code)]
     pub fn draw_circle(&self, radius: f32, center: Point, color: glm::Vec4, fill: bool) {
-        let rect = RotateRect::new(Point::new(center.x - radius, center.y - radius), Point::new(radius * 2., radius * 2.), Radians(0.));
-        let prim = if fill { PrimType::Circle } else { PrimType::Ring };
-        DrawPolygon { prim, fill, color, rect }.draw(self);
+        let rect = RotateRect::new(
+            Point::new(center.x - radius, center.y - radius),
+            Point::new(radius * 2., radius * 2.),
+            Radians(0.),
+        );
+        let prim = if fill {
+            PrimType::Circle
+        } else {
+            PrimType::Ring
+        };
+        DrawPolygon {
+            prim,
+            fill,
+            color,
+            rect,
+        }
+        .draw(self);
     }
     #[allow(dead_code)]
     pub fn draw_rect(&self, rect: Rect, color: glm::Vec4, fill: bool, rot: Radians) {
         let rect = RotateRect::from_rect(rect, rot);
-        DrawPolygon { prim: PrimType::Rect, fill, color, rect }.draw(self);
+        DrawPolygon {
+            prim: PrimType::Rect,
+            fill,
+            color,
+            rect,
+        }
+        .draw(self);
     }
     #[allow(dead_code)]
-    pub fn draw_square(&self, side: f32, offset: Point, color: glm::Vec4, fill: bool, rot: Radians) {
+    pub fn draw_square(
+        &self,
+        side: f32,
+        offset: Point,
+        color: glm::Vec4,
+        fill: bool,
+        rot: Radians,
+    ) {
         let rect = RotateRect::new(offset, Point::new(side, side), rot);
-        DrawPolygon { prim: PrimType::Rect, fill, color, rect }.draw(self);
+        DrawPolygon {
+            prim: PrimType::Rect,
+            fill,
+            color,
+            rect,
+        }
+        .draw(self);
     }
-    pub fn draw_iso_tri(&self, center: Point, base: f32, height: f32, color: glm::Vec4, fill:bool, rot: Radians) {
-        let rect = RotateRect::new(Point::new(center.x - base / 2., center.y - height / 2.), Point::new(base, height), rot);
-        DrawPolygon { prim: PrimType::Triangle, fill, color, rect }.draw(self);
+    pub fn draw_iso_tri(
+        &self,
+        center: Point,
+        base: f32,
+        height: f32,
+        color: glm::Vec4,
+        fill: bool,
+        rot: Radians,
+    ) {
+        let rect = RotateRect::new(
+            Point::new(center.x - base / 2., center.y - height / 2.),
+            Point::new(base, height),
+            rot,
+        );
+        DrawPolygon {
+            prim: PrimType::Triangle,
+            fill,
+            color,
+            rect,
+        }
+        .draw(self);
     }
     #[allow(dead_code)]
     pub fn draw_line(&self, p1: Point, p2: Point, color: glm::Vec4, line_width: f32) {
-        DrawLine { p1, p2, line_width, color }.draw(self);
+        DrawLine {
+            p1,
+            p2,
+            line_width,
+            color,
+        }
+        .draw(self);
     }
 }
 
 pub struct ShapeBuilder {
-    p: DrawPolygon
+    p: DrawPolygon,
 }
 
 #[allow(dead_code)]
 impl ShapeBuilder {
     pub fn new() -> Self {
-        ShapeBuilder { p: DrawPolygon::default() }
+        ShapeBuilder {
+            p: DrawPolygon::default(),
+        }
     }
     pub fn offset(mut self, x: i32, y: i32) -> Self {
-        self.p.rect.offset = Point {x: x as f32,y: y as f32};
+        self.p.rect.offset = Point {
+            x: x as f32,
+            y: y as f32,
+        };
         self
     }
     pub fn rot<T: Into<Radians>>(mut self, rot: T) -> ShapeBuilder {
@@ -904,7 +1102,7 @@ impl ShapeBuilder {
         self
     }
     pub fn color(mut self, r: u8, g: u8, b: u8) -> Self {
-        self.p.color = rgb_to_f32(r,g,b);
+        self.p.color = rgb_to_f32(r, g, b);
         self
     }
     pub fn alpha(mut self, a: f32) -> Self {
@@ -940,7 +1138,7 @@ impl ShapeBuilder {
         self.p.fill = fill;
         self
     }
-    pub fn get(mut self) -> Shape { 
+    pub fn get(mut self) -> Shape {
         if let PT::Circle = self.p.prim {
             if !self.p.fill {
                 self.p.prim = PT::Ring
@@ -956,13 +1154,15 @@ impl ShapeBuilder {
 }
 
 pub struct LineBuilder {
-    l: DrawLine
+    l: DrawLine,
 }
 
 #[allow(dead_code)]
 impl LineBuilder {
     pub fn new() -> LineBuilder {
-        LineBuilder { l: DrawLine::default() }
+        LineBuilder {
+            l: DrawLine::default(),
+        }
     }
     pub fn points2(mut self, p1: &Point, p2: &Point) -> Self {
         self.l.p1 = *p1;
@@ -970,12 +1170,12 @@ impl LineBuilder {
         self
     }
     pub fn points(mut self, x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
-        self.l.p1 = Point {x: x1, y: y1};
-        self.l.p2 = Point {x: x2, y: y2};
+        self.l.p1 = Point { x: x1, y: y1 };
+        self.l.p2 = Point { x: x2, y: y2 };
         self
     }
     pub fn color(mut self, r: u8, g: u8, b: u8) -> Self {
-        self.l.color = rgb_to_f32(r,g,b);
+        self.l.color = rgb_to_f32(r, g, b);
         self
     }
     pub fn alpha(mut self, a: f32) -> Self {
@@ -986,7 +1186,9 @@ impl LineBuilder {
         self.l.line_width = width;
         self
     }
-    pub fn get(self) -> Shape { Shape::Line(self.l) }
+    pub fn get(self) -> Shape {
+        Shape::Line(self.l)
+    }
 }
 
 pub fn rgb_to_f32(r: u8, g: u8, b: u8) -> glm::Vec4 {
@@ -996,7 +1198,7 @@ pub fn rgb_to_f32(r: u8, g: u8, b: u8) -> glm::Vec4 {
 #[derive(Clone)]
 pub struct Border {
     pub width: Point,
-    pub color: glm::Vec4
+    pub color: glm::Vec4,
 }
 
 impl Border {
@@ -1011,14 +1213,21 @@ pub struct BorderRect {
     fill_color: glm::Vec4,
 }
 
-impl BorderRect { 
+impl BorderRect {
     pub fn new(size: Point, fill_color: glm::Vec4, border: Border) -> Self {
-        BorderRect { size, fill_color, border }
+        BorderRect {
+            size,
+            fill_color,
+            border,
+        }
     }
     pub fn draw(&self, offset: Point, draw_ctx: &DrawCtx) {
-        let border = Rect::new(offset, offset + self.size + self.border.width * Point::new(2., 2.));
-        draw_ctx.draw_rect(border.clone(), self.fill_color, true, Radians(0.)); 
-        draw_ctx.draw_rect(border, self.border.color, false, Radians(0.)); 
+        let border = Rect::new(
+            offset,
+            offset + self.size + self.border.width * Point::new(2., 2.),
+        );
+        draw_ctx.draw_rect(border.clone(), self.fill_color, true, Radians(0.));
+        draw_ctx.draw_rect(border, self.border.color, false, Radians(0.));
     }
 }
 
@@ -1026,4 +1235,3 @@ impl BorderRect {
     let rect = RotateRect::new(Point::new(center.x - radius, center.y - radius), Point::new(radius * 2., radius * 2.), Radians(0.));
     DrawPolygon { prim: PrimType::Circle, fill: true, color: rgb_to_f32(color.0, color.1, color.2), rect }.draw(draw_ctx);
 }*/
-
