@@ -894,84 +894,12 @@ impl Widget for DropDown {
     }
 }
 
-pub struct Button {
-    pub onclick: WidgetResponse,
-    border_rect: BorderRect,
-    rect: [Rect; 1],
-    label: [Box<dyn Widget>; 1],
-}
-
-impl Button {
-    pub fn new(border: Border, fill_color: glm::Vec4, onclick: WidgetResponse) -> Self {
-        let size = Point::origin();
-        let rect = Rect::empty();
-        let border_rect = BorderRect::new(size, fill_color, border);
-        Button {
-            onclick,
-            border_rect,
-            label: [new_label("")],
-            rect: [rect],
-        }
-    }
-}
-
 fn downcast_widget<'a, W: Widget + 'static>(w: &'a Box<dyn Widget + 'static>) -> &'a W {
     w.as_any().unwrap().downcast_ref::<W>().unwrap()
 }
 
 fn downcast_widget_mut<'a, W: Widget + 'static>(w: &'a mut Box<dyn Widget + 'static>) -> &'a mut W {
     w.as_any_mut().unwrap().downcast_mut::<W>().unwrap()
-}
-
-impl WidgetIterT for Button {
-    type Child = Label;
-    fn add(&mut self, item: Self::Child) {
-        self.label[0] = Box::new(item);
-    }
-    fn widgets<'a>(&'a self) -> WidgetsIter<'a> {
-        Box::new(self.label.iter())
-    }
-    fn widgets_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Box<dyn Widget>> + 'a> {
-        Box::new(self.label.iter_mut())
-    }
-    fn widgets_plus_rects<'a>(
-        &'a self,
-    ) -> Box<dyn Iterator<Item = (&'a Box<dyn Widget>, &'a Rect)> + 'a> {
-        Box::new(self.label.iter().zip(self.rect.iter()))
-    }
-    fn widgets_plus_rects_mut<'a>(
-        &'a mut self,
-    ) -> Box<dyn Iterator<Item = (&'a mut Box<dyn Widget>, &'a mut Rect)> + 'a> {
-        Box::new(self.label.iter_mut().zip(self.rect.iter_mut()))
-    }
-    fn measure_items(&self, _: &DrawCtx) -> Point {
-        self.border_rect.size + self.border_rect.border.width * Point::new(2., 2.)
-    }
-    fn hover_self(&mut self, _: &Point, ctx: &mut WidgetEventCtx) -> Option<WidgetResponse> {
-        *ctx.cursor = SystemCursor::Hand;
-        Some(just_status(WidgetStatus::FINE))
-    }
-    fn draw_self(&self, offset: &Point, ctx: &mut WidgetDrawCtx) {
-        self.border_rect.draw(*offset, ctx.draw_ctx);
-    }
-    fn click_self(&mut self, _: &Point, _: &mut WidgetEventCtx) -> Option<WidgetResponse> {
-        Some((self.onclick.0, Rc::clone(&self.onclick.1)))
-    }
-    fn is_leaf(&self) -> bool {
-        true
-    }
-    fn remeasure_items(&mut self, ctx: &DrawCtx) -> Point {
-        let label = downcast_widget::<Label>(&self.label[0]);
-        let size = ctx.render_text.measure(&label.text, label.text_params.scale);
-        self.border_rect.size = size;
-        let off = self.border_rect.border.width;
-        self.rect[0] = Rect {
-            c1: off,
-            c2: off + size,
-        };
-        size
-    }
-    fn serialize_items(&self, _: &mut MDDoc) {}
 }
 
 pub trait SerializeT {
@@ -1338,15 +1266,35 @@ pub struct WidgetS<'a> {
 }
 
 pub trait WidgetBehavior {
-    fn draw_self(&self, offset: &Point, ctx: &mut WidgetDrawCtx);
-    fn click_self(&self, offset: &Point, ctx: &mut WidgetEventCtx);
-    fn hover_self(&self, offset: &Point, ctx: &mut WidgetEventCtx);
-    fn measure(&self, ctx: &DrawCtx) -> Point;
-    fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
-        self.measure(ctx)
+    fn draw_self(&self, _: &Point, _: &mut WidgetDrawCtx) { }
+    fn click_self(&self, _: &Point, _: &mut WidgetEventCtx) { }
+    fn hover_self(&self, _: &Point, _: &mut WidgetEventCtx) { }
+    fn measure_self(&self, _: &DrawCtx) -> Option<Point> {
+        None
+    }
+    fn remeasure_self(&mut self, ctx: &DrawCtx) -> Option<Point> {
+        self.measure_self(ctx)
     }
     fn selection(&self) -> Option<Box<dyn SelectionT>> {
         None
+    }
+    fn as_any(&self) -> Option<& dyn Any> {
+        None
+    }
+    fn as_any_mut(&mut self) -> Option<&mut dyn Any> {
+        None
+    }
+}
+
+pub struct Container { }
+
+impl WidgetBehavior for Container { }
+
+pub fn new_widget<T: WidgetBehavior + Sized + 'static>(w: T) -> WidgetS<'static> {
+    WidgetS {
+        bhv: Box::new(w),
+        layout: None,
+        children: Vec::new()
     }
 }
 
@@ -1369,9 +1317,31 @@ impl<'a> WidgetS<'a> {
             layout.hover_l(&mut self.children, offset, ctx);
         }
     }
+    fn measure(&self, ctx: &DrawCtx) -> Point {
+        self.bhv.measure_self(ctx).or(
+            self.layout.as_ref().map(|l| l.measure_items_l(ctx))).unwrap_or(
+            Point::origin())
+    }
+    fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
+        let self_size = self.bhv.remeasure_self(ctx);
+        let c_size = if let Some(ref mut layout) = self.layout {
+            Some(layout.remeasure_items_l(&mut self.children, ctx))
+        } else { None };
+        self_size.or(c_size).unwrap_or(Point::origin())
+    }
     fn push(&'a mut self, child: WidgetS<'a>) -> &mut Self {
         self.children.push(child);
         self
+    }
+    fn layout(&'a mut self, layout: Box<dyn WidgetLayout<'a>>) -> &mut Self {
+        self.layout = Some(layout);
+        self
+    }
+    fn downcast<W: WidgetBehavior + 'static>(&'a self) -> &'a W {
+        self.bhv.as_any().unwrap().downcast_ref::<W>().unwrap()
+    }
+    fn downcast_mut<W: WidgetBehavior + 'static>(&'a mut self) -> &'a mut W {
+        self.bhv.as_any_mut().unwrap().downcast_mut::<W>().unwrap()
     }
 }
 
@@ -1415,7 +1385,7 @@ impl<'a> WidgetLayout<'a> for WidgetList {
         let mut size = Point::origin();
         for (i, w) in widgets.iter_mut().enumerate() {
             let spacing = if i == 0 { 0. } else { self.spacing as f32 };
-            let m = w.bhv.remeasure(ctx);
+            let m = w.remeasure(ctx);
             match self.orientation {
                 Orientation::Vertical => {
                     off.y = size.y + spacing;
@@ -1480,3 +1450,77 @@ impl<'a> WidgetLayout<'a> for WidgetGrid {
         Box::new(self.widget_rects.iter().flatten())
     }
 }
+
+pub struct Button {
+    pub onclick: WidgetResponse,
+    border_rect: BorderRect,
+    rect: [Rect; 1],
+    label: [Box<dyn Widget>; 1],
+}
+
+impl Button {
+    pub fn new(border: Border, fill_color: glm::Vec4, onclick: WidgetResponse) -> Self {
+        let size = Point::origin();
+        let rect = Rect::empty();
+        let border_rect = BorderRect::new(size, fill_color, border);
+        Button {
+            onclick,
+            border_rect,
+            label: [new_label("")],
+            rect: [rect],
+        }
+    }
+}
+
+impl WidgetIterT for Button {
+    type Child = Label;
+    fn add(&mut self, item: Self::Child) {
+        self.label[0] = Box::new(item);
+    }
+    fn widgets<'a>(&'a self) -> WidgetsIter<'a> {
+        Box::new(self.label.iter())
+    }
+    fn widgets_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Box<dyn Widget>> + 'a> {
+        Box::new(self.label.iter_mut())
+    }
+    fn widgets_plus_rects<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = (&'a Box<dyn Widget>, &'a Rect)> + 'a> {
+        Box::new(self.label.iter().zip(self.rect.iter()))
+    }
+    fn widgets_plus_rects_mut<'a>(
+        &'a mut self,
+    ) -> Box<dyn Iterator<Item = (&'a mut Box<dyn Widget>, &'a mut Rect)> + 'a> {
+        Box::new(self.label.iter_mut().zip(self.rect.iter_mut()))
+    }
+    fn measure_items(&self, _: &DrawCtx) -> Point {
+        self.border_rect.size + self.border_rect.border.width * Point::new(2., 2.)
+    }
+    fn hover_self(&mut self, _: &Point, ctx: &mut WidgetEventCtx) -> Option<WidgetResponse> {
+        *ctx.cursor = SystemCursor::Hand;
+        Some(just_status(WidgetStatus::FINE))
+    }
+    fn draw_self(&self, offset: &Point, ctx: &mut WidgetDrawCtx) {
+        self.border_rect.draw(*offset, ctx.draw_ctx);
+    }
+    fn click_self(&mut self, _: &Point, _: &mut WidgetEventCtx) -> Option<WidgetResponse> {
+        Some((self.onclick.0, Rc::clone(&self.onclick.1)))
+    }
+    fn is_leaf(&self) -> bool {
+        true
+    }
+    fn remeasure_items(&mut self, ctx: &DrawCtx) -> Point {
+        let label = downcast_widget::<Label>(&self.label[0]);
+        let size = ctx.render_text.measure(&label.text, label.text_params.scale);
+        self.border_rect.size = size;
+        let off = self.border_rect.border.width;
+        self.rect[0] = Rect {
+            c1: off,
+            c2: off + size,
+        };
+        size
+    }
+    fn serialize_items(&self, _: &mut MDDoc) {}
+}
+
+
