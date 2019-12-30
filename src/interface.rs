@@ -299,7 +299,7 @@ pub fn new_form(ctx: &DrawCtx) -> Box<dyn Widget> {//WidgetGrid {
         new_label("Strategy:"),
         new_dropdown(vec!["Trend", "Mean Reversion"], 0),
     ];
-    form += vec![new_label("Date:"), Box::new(DateWidget::new())];
+    //form += vec![new_label("Date:"), Box::new(DateWidget::new())];
     form += vec![
         new_label("Volume:"),
         new_dropdown(vec!["Yes", "No"], 0),

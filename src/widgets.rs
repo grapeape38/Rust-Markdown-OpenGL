@@ -54,10 +54,9 @@ pub enum Orientation {
     Horizontal,
 }
 
-pub enum WidgetType<'a> {
+pub enum WidgetType {
     Widget,
     Container,
-    Wrapper(Box<dyn Widget + 'a>)
 }
 
 pub trait Widget {
@@ -421,57 +420,6 @@ impl<T: WidgetIterT> Widget for T {
     }
 }
 
-pub trait WidgetWrapper {
-    type Wrapped;
-    fn wrapped(&self) -> &Self::Wrapped;
-    fn wrapped_mut(&mut self) -> &mut Self::Wrapped;
-}
-
-impl<I> WidgetWrapper for &I where I : WidgetIterT<Child=Box<dyn Widget>> {
-    type Wrapped = I;
-    fn wrapped(&self) -> &Self::Wrapped {
-        self
-    }
-    fn wrapped_mut(&mut self) -> &mut Self::Wrapped {
-        self
-    }
-}
-
-impl<W: WidgetIterT<Child=Box<dyn Widget>> + 'static, T: WidgetWrapper<Wrapped=W>> WidgetIterT for T {
-    type Child = Box<dyn Widget>;
-    fn add(&mut self, item: Self::Child) {
-        self.wrapped_mut().add(item);
-    }
-    fn widgets<'a>(&'a self) -> WidgetsIter<'a> {
-        self.wrapped().widgets()
-    }
-    fn widgets_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Box<dyn Widget>> + 'a> {
-        self.wrapped_mut().widgets_mut()
-    }
-    fn widgets_plus_rects<'a>(
-        &'a self,
-    ) -> Box<dyn Iterator<Item = (&'a Box<dyn Widget>, &'a Rect)> + 'a> {
-        self.wrapped().widgets_plus_rects()
-    }
-    fn widgets_plus_rects_mut<'a>(
-        &'a mut self,
-    ) -> Box<dyn Iterator<Item = (&'a mut Box<dyn Widget>, &'a mut Rect)> + 'a> {
-        self.wrapped_mut().widgets_plus_rects_mut()
-    }
-    fn measure_items(&self, ctx: &DrawCtx) -> Point {
-        self.wrapped().measure_items(ctx)
-    }
-    fn remeasure_items(&mut self, ctx: &DrawCtx) -> Point {
-        self.wrapped_mut().remeasure_items(ctx)
-    }
-    fn serialize_items(&self, buf: &mut MDDoc) {
-        self.wrapped().serialize_items(buf)
-    }
-    fn widget_type_self(&self) -> WidgetType {
-        WidgetType::Wrapper(Box::new(self.wrapped()))
-    }
-}
-
 pub struct WidgetGrid {
     rows: Vec<Vec<Box<dyn Widget>>>,
     widget_rects: Vec<Vec<Rect>>,
@@ -574,7 +522,7 @@ pub fn new_label<T: Into<String>>(text: T) -> Box<dyn Widget> {
     Box::new(Label::new(text, None, None, None, TextParams::new()))
 }
 
-pub struct DateWidget {
+/*pub struct DateWidget {
     wl: WidgetList,
 }
 
@@ -598,7 +546,7 @@ impl WidgetWrapper for DateWidget {
     fn wrapped_mut(&mut self) -> &mut WidgetList {
         &mut self.wl
     }
-    /*fn serialize(&self, buf: &mut MDDoc) {
+    fn serialize(&self, buf: &mut MDDoc) {
         self.wl.get_widget(0).unwrap().serialize(buf);
         buf.body.push('/' as u8);
         self.wl.get_widget(1).unwrap().serialize(buf);
@@ -607,8 +555,8 @@ impl WidgetWrapper for DateWidget {
         let local = chrono::Local::now();
         buf.body.push(' ' as u8);
         buf.title.date = local.to_rfc3339();
-    }*/
-}
+    }
+}*/
 
 pub struct Label {
     text: String,
@@ -1119,9 +1067,6 @@ pub type SelectMap = Vec<Option<Box<dyn SelectionT>>>;
 pub type ChildrenSizes = Vec<Vec<usize>>;
 
 fn children_recurse<'a>(cur: &Box<dyn Widget + 'a>, pos: &mut usize, vec: &mut ChildrenSizes) -> usize {
-    if let WidgetType::Wrapper(wrapped) = cur.widget_type() {
-        return children_recurse(&wrapped, pos, vec);
-    }
     let mut size = 1;
     let idx = *pos;
     *pos += 1;
@@ -1168,9 +1113,6 @@ pub struct SelectionList {
 impl SelectionList {
     fn recurse_build<'a>(cur: &Box<dyn Widget + 'a>, pos: &mut usize, 
         v: &mut Vec<Box<dyn SelectionT>>, widget_idx: &mut Vec<Option<usize>>) {
-        if let WidgetType::Wrapper(wrapped) = cur.widget_type() {
-            return SelectionList::recurse_build(&wrapped, pos, v, widget_idx);
-        }
         if let Some(select) = cur.selection() {
             widget_idx.push(Some(v.len()));
             v.push(select);
@@ -1386,5 +1328,155 @@ impl<'a, T: Copy> PushValue<'a, T> {
 impl<'a, T: Copy> Drop for PushValue<'a, T> {
     fn drop(&mut self) {
         *self.val_ref = self.saved_value
+    }
+}
+
+pub struct WidgetS<'a> {
+    bhv: Box<dyn WidgetBehavior>,
+    layout: Option<Box<dyn WidgetLayout<'a>>>,
+    children: Vec<WidgetS<'a>>
+}
+
+pub trait WidgetBehavior {
+    fn draw_self(&self, offset: &Point, ctx: &mut WidgetDrawCtx);
+    fn click_self(&self, offset: &Point, ctx: &mut WidgetEventCtx);
+    fn hover_self(&self, offset: &Point, ctx: &mut WidgetEventCtx);
+    fn measure(&self, ctx: &DrawCtx) -> Point;
+    fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
+        self.measure(ctx)
+    }
+    fn selection(&self) -> Option<Box<dyn SelectionT>> {
+        None
+    }
+}
+
+impl<'a> WidgetS<'a> {
+    fn draw(&'a self, offset: &Point, ctx: &mut WidgetDrawCtx) {
+        self.bhv.draw_self(offset, ctx);
+        if let Some(ref layout) = self.layout {
+            layout.draw_l(&self.children, offset, ctx);
+        }
+    }
+    fn click(&'a mut self, offset: &Point, ctx: &mut WidgetEventCtx) {
+        self.bhv.click_self(offset, ctx);
+        if let Some(ref mut layout) = self.layout {
+            layout.click_l(&mut self.children, offset, ctx);
+        }
+    }
+    fn hover(&'a mut self, offset: &Point, ctx: &mut WidgetEventCtx) {
+        self.bhv.hover_self(offset, ctx);
+        if let Some(ref mut layout) = self.layout {
+            layout.hover_l(&mut self.children, offset, ctx);
+        }
+    }
+    fn push(&'a mut self, child: WidgetS<'a>) -> &mut Self {
+        self.children.push(child);
+        self
+    }
+}
+
+pub trait WidgetLayout<'a> {
+    fn rects(&'a self) -> Box<dyn Iterator<Item=&'a Rect> + 'a>;
+    fn measure_items_l(&self, ctx: &DrawCtx) -> Point;
+    fn remeasure_items_l(&mut self, widgets: &mut Vec<WidgetS>, ctx: &DrawCtx) -> Point;
+    fn draw_l(&'a self, widgets: &'a Vec<WidgetS<'a>>, offset: &Point, ctx: &mut WidgetDrawCtx) {
+        //self.draw_self(offset, ctx);
+        for (w, r) in widgets.iter().zip(self.rects()) {
+            w.draw(&(*offset + r.c1), ctx.next_widget_ctx(false));
+        }
+    }
+    fn click_l(&'a mut self, widgets: &'a mut Vec<WidgetS<'a>>, off_pt: &Point, ctx: &mut WidgetEventCtx) {
+        let w_idx = ctx.widget_idx;
+        for (c_idx, (w, r)) in widgets.iter_mut().zip(self.rects()).enumerate() {
+            if r.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
+                //println!("Clicked in bounds! {:?} {:?}", w_idx, c_idx);
+                w.click(&(*off_pt - r.c1), ctx.child_ctx(w_idx, c_idx, false));
+                break;
+            }
+        }
+    }
+    fn hover_l(&'a mut self, widgets: &'a mut Vec<WidgetS<'a>>, off_pt: &Point, ctx: &mut WidgetEventCtx) {
+        let w_idx = ctx.widget_idx;
+        for (c_idx, (w, r)) in widgets.iter_mut().zip(self.rects()).enumerate() {
+            if r.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
+                w.hover(&(*off_pt - r.c1), ctx.child_ctx(w_idx, c_idx, false));
+                break;
+            }
+        }
+    }
+}
+
+impl<'a> WidgetLayout<'a> for WidgetList {
+    fn measure_items_l(&self, _: &DrawCtx) -> Point {
+        self.size
+    }
+    fn remeasure_items_l(&mut self, widgets: &mut Vec<WidgetS>, ctx: &DrawCtx) -> Point {
+        let mut off = Point::origin();
+        let mut size = Point::origin();
+        for (i, w) in widgets.iter_mut().enumerate() {
+            let spacing = if i == 0 { 0. } else { self.spacing as f32 };
+            let m = w.bhv.remeasure(ctx);
+            match self.orientation {
+                Orientation::Vertical => {
+                    off.y = size.y + spacing;
+                    size.x = size.x.max(m.x);
+                    size.y += m.y + spacing;
+                }
+                _ => {
+                    off.x = size.x + spacing;
+                    size.x += m.x + spacing;
+                    size.y = size.y.max(m.y);
+                }
+            }
+            self.widget_rects[i] = Rect {
+                c1: off,
+                c2: off + m,
+            };
+        }
+        *self.needs_draw.borrow_mut() = vec![true; self.widgets.len()];
+        self.size = size;
+        size
+    }
+    fn rects(&'a self) -> Box<dyn Iterator<Item=&'a Rect> + 'a> {
+        Box::new(self.widget_rects.iter())
+    }
+}
+
+impl<'a> WidgetLayout<'a> for WidgetGrid {
+    fn measure_items_l(&self, _: &DrawCtx) -> Point {
+        self.size
+    }
+    fn remeasure_items_l(&mut self, widgets: &mut Vec<WidgetS>, ctx: &DrawCtx) -> Point {
+        if let Some(max_n_col) = self.rows.iter().max_by_key(|r| r.len()).map(|r| r.len()) {
+            let mut max_col_widths: Vec<f32> = vec![0.; max_n_col];
+            let mut row_heights: Vec<f32> = vec![0.; self.rows.len()];
+            for (r, row) in self.rows.iter_mut().enumerate() {
+                for (c, widget) in row.iter_mut().enumerate() {
+                    let m = widget.remeasure(ctx);
+                    self.widget_rects[r][c] = Rect {
+                        c1: Point::origin(),
+                        c2: m,
+                    };
+                    max_col_widths[c] = max_col_widths[c].max(m.x);
+                    row_heights[r] = row_heights[r].max(m.y);
+                }
+            }
+            let mut row_offset = 0.;
+            for (r, rect_row) in self.widget_rects.iter_mut().enumerate() {
+                let mut col_offset = 0.;
+                for (c, rect) in rect_row.iter_mut().enumerate() {
+                    rect.set_offset(&Point::new(col_offset, row_offset));
+                    col_offset += max_col_widths[c] + self.spacing.x;
+                }
+                row_offset += row_heights[r] + self.spacing.y;
+                self.size.x = self.size.x.max(col_offset);
+            }
+            self.size.y = self.size.y.max(row_offset);
+            return self.size;
+        }
+        Point::origin()
+    }
+    fn rects(&'a self) -> Box<dyn Iterator<Item=&'a Rect> + 'a> {
+        Box::new(self.widget_rects.iter().flatten())
     }
 }
