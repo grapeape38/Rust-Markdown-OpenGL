@@ -5,9 +5,10 @@ use crate::interface::{AppState, EventCtx, HandleKey};
 use crate::primitives::{rgb_to_f32, DrawCtx, Point, Radians, Rect, RotateRect};
 use crate::render_text::{RenderText, TextParams};
 use crate::widgets::{
-    just_cb, just_status, MDDoc, SelectionT, Widget, 
-    WidgetDrawCtx, WidgetResponse, WidgetStatus, WidgetEventCtx
+    MDDoc, SelectionT, WidgetBehavior, EventResponse,
+    WidgetDrawCtx, WidgetStatus, WidgetEventCtx
 };
+use crate::widgets::EventResponse::*;
 use ropey::Rope;
 use sdl2::keyboard::Keycode;
 use sdl2::mouse::SystemCursor;
@@ -271,7 +272,7 @@ impl TextEdit {
 }
 
 impl HandleKey for TextEdit {
-    fn handle_key_down(&mut self, kc: &Keycode, ctx: &EventCtx) -> Option<WidgetResponse> {
+    fn handle_key_down(&mut self, kc: &Keycode, ctx: &mut EventCtx) {
         let rt = &ctx.draw_ctx.render_text;
         if let Some(ch) = get_char_from_keycode(*kc) {
             self.insert_char(ch, rt);
@@ -280,23 +281,25 @@ impl HandleKey for TextEdit {
         } else if *kc == Keycode::Backspace {
             self.delete_char(rt);
         } else {
-            return None;
+            return;
         }
-        Some(just_status(WidgetStatus::REDRAW))
+        ctx.set_redraw();
     }
 }
 
 impl SelectionT for TextEdit {
-    fn on_select(&mut self, ctx: &mut EventCtx) -> Option<WidgetResponse> {
+    fn on_select(&mut self, ctx: &mut EventCtx) -> Option<EventResponse> {
         self.select_time = Some(SystemTime::now());
         *ctx.cursor = SystemCursor::IBeam;
-        Some(just_status(WidgetStatus::REDRAW))
+        ctx.set_redraw();
+        Some(Handled)
     }
-    fn on_deselect(&mut self, _: &mut EventCtx) -> Option<WidgetResponse> {
+    fn on_deselect(&mut self, ctx: &mut EventCtx) -> Option<EventResponse> {
         self.select_time = None;
-        Some(just_status(WidgetStatus::REDRAW))
+        ctx.set_redraw();
+        Some(Handled)
     }
-    fn handle_key_down(&mut self, kc: &Keycode, ctx: &EventCtx) -> Option<WidgetResponse> {
+    fn handle_key_down(&mut self, kc: &Keycode, ctx: &mut EventCtx) -> Option<EventResponse> {
         let rt = &ctx.draw_ctx.render_text;
         if let Some(ch) = get_char_from_keycode(*kc) {
             self.insert_char(ch, rt);
@@ -307,7 +310,8 @@ impl SelectionT for TextEdit {
         } else {
             return None;
         }
-        Some(just_status(WidgetStatus::REDRAW))
+        ctx.set_redraw();
+        Some(Handled)
     }
     fn log(&self) {
         println!("text edit select")
@@ -347,8 +351,8 @@ impl TextBox {
 }
 
 #[allow(dead_code)]
-impl Widget for TextBox {
-    fn draw(&self, offset: &Point, ctx: &mut WidgetDrawCtx) {
+impl WidgetBehavior for TextBox {
+    fn draw_self(&self, offset: &Point, ctx: &mut WidgetDrawCtx) {
         let rect = RotateRect {
             offset: *offset,
             ..self.rect.clone()
@@ -356,10 +360,7 @@ impl Widget for TextBox {
         rect.builder().color(255, 255, 255).get().draw(ctx.draw_ctx);
         ctx.get_select::<TextEdit>().unwrap().draw(&rect, ctx.draw_ctx);
     }
-    fn measure(&self, _: &DrawCtx) -> Point {
-        self.rect.size
-    }
-    fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
+    fn remeasure_self_after(&mut self, _: Point, ctx: &DrawCtx) -> Point {
          let size = ctx.render_text.measure(
             &String::from_utf8(
                 "A".as_bytes()
@@ -375,20 +376,14 @@ impl Widget for TextBox {
         self.rect.size = size;
         size
     }
-    fn hover(&mut self, _: &Point, ctx: &mut WidgetEventCtx) -> Option<WidgetResponse> {
+    fn hover_self(&mut self, _: &Point, ctx: &mut WidgetEventCtx) -> Option<EventResponse> {
         *ctx.cursor = SystemCursor::IBeam;
-        Some(just_status(WidgetStatus::FINE))
-    }
-    fn serialize(&self, buf: &mut MDDoc) {
-        /*let text_edit = ctx.select_ctx.get_select::<TextEdit>().unwrap();
-        let rope = &text_edit.text_rope;
-        let s = rope.slice(0..rope.len_chars()).as_str().unwrap();
-        buf.body.extend_from_slice(s.as_bytes())*/
+        Some(EventResponse::Handled)
     }
     fn selection(&self) -> Option<Box<dyn SelectionT>> {
         Some(Box::new(TextEdit::new(&self.default_text, self.rect.size)))
     }
-    fn click(&mut self, off: &Point, ctx: &mut WidgetEventCtx) -> Option<WidgetResponse> {
+    fn click_self(&mut self, off: &Point, ctx: &mut WidgetEventCtx) -> Option<EventResponse> {
         let cursor_pos = ctx.get_select::<TextEdit>().unwrap() 
             .hover_text(off, &self.rect, &ctx.draw_ctx)
             .unwrap_or(0);
@@ -396,15 +391,14 @@ impl Widget for TextBox {
         *ctx.cursor = SystemCursor::IBeam;
         let idx = ctx.select_idx().unwrap();
         //Some(just_status(WidgetStatus::REDRAW))
-        Some(just_cb(Rc::new(move |app: &mut AppState| {
+        ctx.push_cb(Rc::new(move |app: &mut AppState| {
             let text_edit = app.select_state.get_select_mut::<TextEdit>(idx).
                 unwrap();
             text_edit.set_cursor_pos(cursor_pos);
             app.set_select(Some(idx));
-        })))
-    }
-    fn deselect(&mut self) -> Option<WidgetResponse> {
-        None
+        }));
+        ctx.set_redraw();
+        Some(EventResponse::Handled)
     }
 }
 

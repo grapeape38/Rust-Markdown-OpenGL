@@ -4,15 +4,15 @@ extern crate sdl2;
 use crate::primitives::*;
 use crate::render_text::TextParams;
 use crate::widgets::*;
-use chrono::Datelike;
+//use chrono::Datelike;
 use sdl2::event::Event;
 use sdl2::keyboard::{Keycode, Mod};
 use sdl2::mouse::{Cursor, SystemCursor};
 use sdl2::video::Window;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Write;
+//use std::fs::File;
+//use std::io::Write;
 use std::rc::Rc;
 
 pub struct CursorMap(HashMap<SystemCursor, Cursor>);
@@ -91,7 +91,7 @@ impl Shape {
 }
 
 pub struct AppState {
-    pub interface: Box<dyn Widget>,
+    pub interface: WidgetS,
     //pub key_item: Option<HandleKeyItem>,
     pub select_state: SelectionState,
     pub draw_ctx: DrawCtx,
@@ -103,7 +103,7 @@ pub struct AppState {
 pub type CallbackFn = Rc<dyn Fn(&mut AppState)>;
 
 pub trait HandleKey {
-    fn handle_key_down(&mut self, kc: &Keycode, rt: &EventCtx) -> Option<WidgetResponse>;
+    fn handle_key_down(&mut self, kc: &Keycode, rt: &mut EventCtx);
 }
 
 pub type HandleKeyItem = Rc<RefCell<dyn HandleKey>>;
@@ -125,14 +125,14 @@ impl AppState {
             needs_draw: true,
         }
     }
-    pub fn handle_response(&mut self, resp: &Option<WidgetResponse>) {
-        if let Some((status, ref cb)) = resp {
-            if *status & (WidgetStatus::REDRAW) != WidgetStatus::FINE {
-                self.needs_draw = true;
-            }
-            if *status & (WidgetStatus::REDRAW) != WidgetStatus::FINE {
-                self.interface.remeasure(&self.draw_ctx);
-            }
+    pub fn handle_response(&mut self, status: WidgetStatus, callbacks: Vec<CallbackFn>) {
+        if status & (WidgetStatus::REDRAW) != WidgetStatus::FINE {
+            self.needs_draw = true;
+        }
+        if status & (WidgetStatus::REDRAW) != WidgetStatus::FINE {
+            self.interface.remeasure(&self.draw_ctx);
+        }
+        for cb in callbacks {
             cb(self);
         }
     }
@@ -154,7 +154,7 @@ impl AppState {
             cursor: &mut use_cursor,
         };*/
         let mut widget_ctx = WidgetEventCtx::new(&self.draw_ctx, &mut use_cursor, &self.select_state);
-        let resp = match *ev {
+        let _ = match *ev {
             Event::MouseButtonDown {
                 mouse_btn, x, y, ..
             } => {
@@ -181,39 +181,42 @@ impl AppState {
             }
             _ => { None }
         };
+        self.handle_response(widget_ctx.status, widget_ctx.callbacks);
         self.cursors.get(&use_cursor).set();
-        self.handle_response(&resp);
     }
     pub fn handle_keyboard_event(&mut self, ev: &Event) {
-        let mut resp: Option<WidgetResponse> = None;
         let mut use_cursor = SystemCursor::Arrow;
         let mut event_ctx = EventCtx {
             draw_ctx: &self.draw_ctx,
             cursor: &mut use_cursor,
+            callbacks: Vec::new(),
+            status: WidgetStatus::FINE
         };
         if let Event::KeyDown {
             keycode: Some(keycode),
             ..
         } = *ev {
             if self.select_state.is_select() {
-                resp = self.select_state.handle_key_down(&keycode, &mut event_ctx);
+                let resp = self.select_state.handle_key_down(&keycode, &mut event_ctx);
                 if resp.is_none() {
                     if let Keycode::Tab = keycode {
-                        resp = self.select_state.select_next(&mut event_ctx);
+                        self.select_state.select_next(&mut event_ctx);
                     }
                 }
             }
         }
-        self.handle_response(&resp);
+        self.handle_response(event_ctx.status, event_ctx.callbacks);
     }
     pub fn set_select(&mut self, select_idx: Option<usize>) {
         let mut use_cursor = SystemCursor::Arrow;
         let mut event_ctx = EventCtx {
             draw_ctx: &self.draw_ctx,
             cursor: &mut use_cursor,
+            callbacks: Vec::new(),
+            status: WidgetStatus::FINE
         };
-        let resp = self.select_state.set_select(select_idx, &mut event_ctx);
-        self.handle_response(&resp);
+        self.select_state.set_select(select_idx, &mut event_ctx);
+        self.handle_response(event_ctx.status, event_ctx.callbacks);
     }
     pub fn render(&mut self) {
         if self.needs_draw {
@@ -233,7 +236,7 @@ impl AppState {
     title: "AMD - Trend Extension"
     date: 2019-11-26T01:00:00-05:00
     draft: false*/
-    pub fn serialize(&self) {
+    /*pub fn serialize(&self) {
         let mut md = MDDoc::empty();
         self.interface.serialize(&mut md);
         let path = format!(
@@ -263,7 +266,7 @@ impl AppState {
                 println!("Error writing to file {:?}", e);
             }
         }
-    }
+    }*/
 }
 /* SPEC
 * Symbol: AMD
@@ -292,14 +295,10 @@ Level:
     LEVEL_E
  */
 
-pub fn new_form(ctx: &DrawCtx) -> Box<dyn Widget> {//WidgetGrid {
-    let mut form = WidgetGrid::new(Point::new(10., 10.)).builder();
+pub fn new_form(ctx: &DrawCtx) -> WidgetS {//WidgetGrid {
+    let mut form = new_container(WidgetGrid::new(2, Point::new(10., 10.)));
     form += vec![new_label("Symbol:"), new_textbox("", 6)];
-    form += vec![
-        new_label("Strategy:"),
-        new_dropdown(vec!["Trend", "Mean Reversion"], 0),
-    ];
-    //form += vec![new_label("Date:"), Box::new(DateWidget::new())];
+    form += vec![new_label("Strategy:"), new_dropdown(vec!["Trend", "Mean Reversion"], 0)];
     form += vec![
         new_label("Volume:"),
         new_dropdown(vec!["Yes", "No"], 0),
@@ -308,7 +307,7 @@ pub fn new_form(ctx: &DrawCtx) -> Box<dyn Widget> {//WidgetGrid {
     form += vec![new_label("Range:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![
         new_label("Level:"),
-        new_h_list(
+        new_container(WidgetList::new(Orientation::Horizontal, 10)) +
             vec![
                 new_dropdown(
                     vec![
@@ -318,31 +317,40 @@ pub fn new_form(ctx: &DrawCtx) -> Box<dyn Widget> {//WidgetGrid {
                 ),
                 new_dropdown(vec![" ", "Minus"], 0),
             ],
-            10,
-        ),
     ];
     form += vec![new_label("Pattern:"), new_textbox("", 30)];
     form += vec![
         new_label("Portfolio:"),
-        new_serialize::<PortfolioSerializer>(new_dropdown(vec!["A", "B"], 0)),
+        new_dropdown(vec!["A", "B"], 0),
     ];
     let border = Border::new(Point::new(5., 5.), rgb_to_f32(0, 0, 0));
-    let mut submit = Button::new(
+    let mut submit = new_button(
         border,
         rgb_to_f32(0, 255, 255),
-        just_cb(Rc::new(|app: &mut AppState| app.serialize())),
-    )
-    .builder();
-    submit += Label::new("Submit", None, None, None, TextParams::new());
-    form += vec![submit.widget()];
-    let mut w = form.widget();
-    w.remeasure(ctx);
-    w
+        Rc::new(|_: &mut AppState| {}));
+    submit += new_label("Submit");
+    form += submit;
+    form.remeasure(ctx);
+    form
 }
 
 pub struct EventCtx<'a> {
     pub draw_ctx: &'a DrawCtx,
     pub cursor: &'a mut SystemCursor,
+    pub callbacks: Vec<CallbackFn>,
+    pub status: WidgetStatus
+}
+
+impl<'a> EventCtx<'a> {
+    pub fn push_cb(&mut self, cb: CallbackFn) {
+        self.callbacks.push(cb);
+    }
+    pub fn set_redraw(&mut self) {
+        self.status |= WidgetStatus::REDRAW;
+    }
+    pub fn set_remeasure(&mut self) {
+        self.status |= WidgetStatus::REMEASURE;
+    }
 }
 
 #[derive(Copy, Clone, PartialEq)]
