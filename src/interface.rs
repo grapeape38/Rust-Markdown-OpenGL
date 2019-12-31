@@ -137,7 +137,7 @@ impl AppState {
         }
     }
     /*pub fn new_widget_ctx<'a>(&'a self, use_cursor: &'a mut SystemCursor) -> WidgetEventCtx<'a> {
-        WidgetEventCtx { 
+        WidgetEventCtx {
             draw_ctx: &self.draw_ctx,
             cursor: use_cursor,
             select_ctx: SelectCtx {
@@ -153,7 +153,8 @@ impl AppState {
             draw_ctx: &self.draw_ctx,
             cursor: &mut use_cursor,
         };*/
-        let mut widget_ctx = WidgetEventCtx::new(&self.draw_ctx, &mut use_cursor, &self.select_state);
+        let mut widget_ctx =
+            WidgetEventCtx::new(&self.draw_ctx, &mut use_cursor, &self.select_state);
         let _ = match *ev {
             Event::MouseButtonDown {
                 mouse_btn, x, y, ..
@@ -164,9 +165,10 @@ impl AppState {
                         y: y as f32 - INTERFACE_OFFSET.1,
                     };
                     self.interface.click(&pt, &mut widget_ctx)
-                        //.or(self.select_state.set_select(None, &mut event_ctx))
+                //.or(self.select_state.set_select(None, &mut event_ctx))
+                } else {
+                    None
                 }
-                else { None }
             }
             Event::MouseButtonUp { mouse_btn, .. } => {
                 if mouse_btn == sdl2::mouse::MouseButton::Left {}
@@ -179,9 +181,14 @@ impl AppState {
                 };
                 self.interface.hover(&pt, &mut widget_ctx)
             }
-            _ => { None }
+            _ => None,
         };
-        self.handle_response(widget_ctx.status, widget_ctx.callbacks);
+        if self.interface.needs_measure() {
+            self.interface.remeasure(widget_ctx.draw_ctx);
+        }
+        for cb in widget_ctx.callbacks {
+            cb(self)
+        }
         self.cursors.get(&use_cursor).set();
     }
     pub fn handle_keyboard_event(&mut self, ev: &Event) {
@@ -190,12 +197,13 @@ impl AppState {
             draw_ctx: &self.draw_ctx,
             cursor: &mut use_cursor,
             callbacks: Vec::new(),
-            status: WidgetStatus::FINE
+            status: WidgetStatus::FINE,
         };
         if let Event::KeyDown {
             keycode: Some(keycode),
             ..
-        } = *ev {
+        } = *ev
+        {
             if self.select_state.is_select() {
                 let resp = self.select_state.handle_key_down(&keycode, &mut event_ctx);
                 if resp.is_none() {
@@ -205,7 +213,7 @@ impl AppState {
                 }
             }
         }
-        self.handle_response(event_ctx.status, event_ctx.callbacks);
+        //self.handle_response(event_ctx.status, event_ctx.callbacks);
     }
     pub fn set_select(&mut self, select_idx: Option<usize>) {
         let mut use_cursor = SystemCursor::Arrow;
@@ -213,10 +221,10 @@ impl AppState {
             draw_ctx: &self.draw_ctx,
             cursor: &mut use_cursor,
             callbacks: Vec::new(),
-            status: WidgetStatus::FINE
+            status: WidgetStatus::FINE,
         };
         self.select_state.set_select(select_idx, &mut event_ctx);
-        self.handle_response(event_ctx.status, event_ctx.callbacks);
+        //self.handle_response(event_ctx.status, event_ctx.callbacks);
     }
     pub fn render(&mut self) {
         if self.needs_draw {
@@ -295,20 +303,21 @@ Level:
     LEVEL_E
  */
 
-pub fn new_form(ctx: &DrawCtx) -> WidgetS {//WidgetGrid {
+pub fn new_form(ctx: &DrawCtx) -> WidgetS {
+    //WidgetGrid {
     let mut form = new_container(WidgetGrid::new(2, Point::new(10., 10.)));
     form += vec![new_label("Symbol:"), new_textbox("", 6)];
-    form += vec![new_label("Strategy:"), new_dropdown(vec!["Trend", "Mean Reversion"], 0)];
     form += vec![
-        new_label("Volume:"),
-        new_dropdown(vec!["Yes", "No"], 0),
+        new_label("Strategy:"),
+        new_dropdown(vec!["Trend", "Mean Reversion"], 0),
     ];
+    form += vec![new_label("Volume:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![new_label("Gap:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![new_label("Range:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![
         new_label("Level:"),
-        new_container(WidgetList::new(Orientation::Horizontal, 10)) +
-            vec![
+        new_container(WidgetList::new(Orientation::Horizontal, 10))
+            + vec![
                 new_dropdown(
                     vec![
                         "LEVEL_C", "LEVEL_A", "LEVEL_D", "LEVEL_B", "LEVEL_E", "LEVEL_F", "LEVEL_G",
@@ -319,15 +328,13 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetS {//WidgetGrid {
             ],
     ];
     form += vec![new_label("Pattern:"), new_textbox("", 30)];
-    form += vec![
-        new_label("Portfolio:"),
-        new_dropdown(vec!["A", "B"], 0),
-    ];
+    form += vec![new_label("Portfolio:"), new_dropdown(vec!["A", "B"], 0)];
     let border = Border::new(Point::new(5., 5.), rgb_to_f32(0, 0, 0));
     let mut submit = new_button(
         border,
         rgb_to_f32(0, 255, 255),
-        Rc::new(|_: &mut AppState| {}));
+        Rc::new(|_: &mut AppState| {}),
+    );
     submit += new_label("Submit");
     form += submit;
     form.remeasure(ctx);
@@ -338,7 +345,7 @@ pub struct EventCtx<'a> {
     pub draw_ctx: &'a DrawCtx,
     pub cursor: &'a mut SystemCursor,
     pub callbacks: Vec<CallbackFn>,
-    pub status: WidgetStatus
+    pub status: WidgetStatus,
 }
 
 impl<'a> EventCtx<'a> {

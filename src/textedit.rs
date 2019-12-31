@@ -4,16 +4,16 @@ extern crate sdl2;
 use crate::interface::{AppState, EventCtx, HandleKey};
 use crate::primitives::{rgb_to_f32, DrawCtx, Point, Radians, Rect, RotateRect};
 use crate::render_text::{RenderText, TextParams};
-use crate::widgets::{
-    MDDoc, SelectionT, WidgetBehavior, EventResponse,
-    WidgetDrawCtx, WidgetStatus, WidgetEventCtx
-};
 use crate::widgets::EventResponse::*;
+use crate::widgets::{
+    EventResponse, SelectionT, WidgetBehavior, WidgetDrawCtx, WidgetEventCtx, WidgetProps,
+    WidgetStatus,
+};
 use ropey::Rope;
 use sdl2::keyboard::Keycode;
 use sdl2::mouse::SystemCursor;
-use std::time::SystemTime;
 use std::rc::Rc;
+use std::time::SystemTime;
 
 #[derive(Debug)]
 struct TextCursor {
@@ -337,7 +337,7 @@ impl TextBox {
             //text_edit: TextEdit::new(default_text, size),
             default_text: String::from(default_text),
             rect: RotateRect::default(),
-            num_chars
+            num_chars,
         }
     }
     /*pub fn new_rotated(default_text: &str, rect: RotateRect) -> Self {
@@ -352,16 +352,18 @@ impl TextBox {
 
 #[allow(dead_code)]
 impl WidgetBehavior for TextBox {
-    fn draw_self(&self, offset: &Point, ctx: &mut WidgetDrawCtx) {
+    fn draw_self(&self, offset: &Point, _: &WidgetProps, ctx: &mut WidgetDrawCtx) {
         let rect = RotateRect {
             offset: *offset,
             ..self.rect.clone()
         };
         rect.builder().color(255, 255, 255).get().draw(ctx.draw_ctx);
-        ctx.get_select::<TextEdit>().unwrap().draw(&rect, ctx.draw_ctx);
+        ctx.get_select::<TextEdit>()
+            .unwrap()
+            .draw(&rect, ctx.draw_ctx);
     }
-    fn remeasure_self_after(&mut self, _: Point, ctx: &DrawCtx) -> Point {
-         let size = ctx.render_text.measure(
+    fn remeasure_self_after(&mut self, _: &WidgetProps, ctx: &DrawCtx) -> Point {
+        let size = ctx.render_text.measure(
             &String::from_utf8(
                 "A".as_bytes()
                     .iter()
@@ -376,15 +378,27 @@ impl WidgetBehavior for TextBox {
         self.rect.size = size;
         size
     }
-    fn hover_self(&mut self, _: &Point, ctx: &mut WidgetEventCtx) -> Option<EventResponse> {
+    fn hover_self(
+        &mut self,
+        _: &Point,
+        _: &mut WidgetProps,
+        ctx: &mut WidgetEventCtx,
+    ) -> Option<EventResponse> {
         *ctx.cursor = SystemCursor::IBeam;
         Some(EventResponse::Handled)
     }
     fn selection(&self) -> Option<Box<dyn SelectionT>> {
         Some(Box::new(TextEdit::new(&self.default_text, self.rect.size)))
     }
-    fn click_self(&mut self, off: &Point, ctx: &mut WidgetEventCtx) -> Option<EventResponse> {
-        let cursor_pos = ctx.get_select::<TextEdit>().unwrap() 
+    fn click_self(
+        &mut self,
+        off: &Point,
+        props: &mut WidgetProps,
+        ctx: &mut WidgetEventCtx,
+    ) -> Option<EventResponse> {
+        let cursor_pos = ctx
+            .get_select::<TextEdit>()
+            .unwrap()
             .hover_text(off, &self.rect, &ctx.draw_ctx)
             .unwrap_or(0);
         println!("Cursor pos: {:?}", cursor_pos);
@@ -392,12 +406,11 @@ impl WidgetBehavior for TextBox {
         let idx = ctx.select_idx().unwrap();
         //Some(just_status(WidgetStatus::REDRAW))
         ctx.push_cb(Rc::new(move |app: &mut AppState| {
-            let text_edit = app.select_state.get_select_mut::<TextEdit>(idx).
-                unwrap();
+            let text_edit = app.select_state.get_select_mut::<TextEdit>(idx).unwrap();
             text_edit.set_cursor_pos(cursor_pos);
             app.set_select(Some(idx));
         }));
-        ctx.set_redraw();
+        props.set_redraw();
         Some(EventResponse::Handled)
     }
 }

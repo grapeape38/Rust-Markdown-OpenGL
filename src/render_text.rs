@@ -230,13 +230,19 @@ impl RenderText {
             prog,
         })
     }
-    pub fn draw<I, J>(&self, text: /*&str*/J, params: &TextParams, rect: &RotateRect, ctx: &DrawCtx) 
-        where I: Iterator<Item=u8>,
-              J: IntoIterator<IntoIter=I, Item=u8>
+    pub fn draw<I, J>(
+        &self,
+        text: /*&str*/ J,
+        params: &TextParams,
+        rect: &RotateRect,
+        ctx: &DrawCtx,
+    ) where
+        I: Iterator<Item = u8>,
+        J: IntoIterator<IntoIter = I, Item = u8>,
     {
         let (scale, uniforms) = (
             params.scale,
-            params.get_uniforms(/*text,*/&rect, self, &ctx.viewport),
+            params.get_uniforms(/*text,*/ &rect, self, &ctx.viewport),
         );
         self.prog.set_used();
         uniforms.send_uniforms(self.prog.id()).unwrap();
