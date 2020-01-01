@@ -1,7 +1,7 @@
 /*extern crate nalgebra_glm;
 extern crate bitflags;*/
 
-use crate::interface::{AppState, CallbackFn, EventCtx};
+use crate::interface::{CallbackFn, EventCtx};
 use crate::primitives::{
     rgb_to_f32, Border, BorderRect, DrawCtx, InBounds, Point, Radians, Rect, RotateRect,
 };
@@ -439,33 +439,40 @@ impl<'a> WidgetDrawCtx<'a> {
     }
 }
 
+pub struct EventResult {
+    pub cursor: SystemCursor,
+    pub callbacks: Vec<CallbackFn>,
+    pub status: WidgetStatus,
+}
+
+impl EventResult {
+    pub fn new() -> Self {
+        EventResult {
+            cursor: SystemCursor::Arrow,
+            callbacks: Vec::new(),
+            status: WidgetStatus::FINE
+        }
+    }
+}
+
 pub struct WidgetEventCtx<'a> {
     pub draw_ctx: &'a DrawCtx,
-    pub cursor: &'a mut SystemCursor,
     pub select_state: &'a SelectionState,
     pub widget_idx: WidgetIdx,
-    pub callbacks: Vec<CallbackFn>,
+    pub res: EventResult
 }
 
 impl<'a> WidgetEventCtx<'a> {
     pub fn new(
         draw_ctx: &'a DrawCtx,
-        cursor: &'a mut SystemCursor,
         select_state: &'a SelectionState,
     ) -> Self {
         WidgetEventCtx {
             draw_ctx,
             select_state,
-            cursor,
             widget_idx: WidgetIdx(0),
-            callbacks: Vec::new(),
+            res: EventResult::new()
         }
-    }
-    fn next_widget_ctx(&mut self, is_leaf: bool) -> &mut Self {
-        if !is_leaf {
-            self.widget_idx.0 += 1;
-        }
-        self
     }
     fn child_ctx(&mut self, parent_idx: WidgetIdx, child_pos: usize, is_leaf: bool) -> &mut Self {
         if !is_leaf {
@@ -483,7 +490,46 @@ impl<'a> WidgetEventCtx<'a> {
         self.select_state.get_select_w(self.widget_idx)
     }
     pub fn push_cb(&mut self, cb: CallbackFn) {
-        self.callbacks.push(cb);
+        self.res.callbacks.push(cb);
+    }
+    pub fn set_cursor(&mut self, cursor: SystemCursor) {
+        self.res.cursor = cursor;
+    }
+    /*fn next_widget_ctx(&mut self, is_leaf: bool) -> &mut Self {
+        if !is_leaf {
+            self.widget_idx.0 += 1;
+        }
+        self
+    }*/
+}
+
+pub type WidgetSizes = Vec<Option<Point>>;
+
+#[allow(dead_code)]
+pub struct MeasureContext<'a> {
+    draw_ctx: &'a DrawCtx,
+    sizes: &'a mut WidgetSizes,
+    widget_idx: WidgetIdx
+}
+
+#[allow(dead_code)]
+impl<'a> MeasureContext<'a> {
+    pub fn new(draw_ctx: &'a DrawCtx, sizes: &'a mut WidgetSizes) -> Self {
+        MeasureContext {
+            draw_ctx,
+            sizes,
+            widget_idx: WidgetIdx(0)
+        }
+    }
+    fn next_widget_ctx(&mut self) -> &mut Self {
+        self.widget_idx.0 += 1;
+        self
+    }
+    fn cur_size(&self) -> Option<Point> {
+        self.sizes[self.widget_idx.0]
+    }
+    fn cur_size_mut(&mut self) -> &mut Option<Point> {
+        &mut self.sizes[self.widget_idx.0]
     }
 }
 
@@ -491,6 +537,7 @@ struct PushValue<'a, T: Copy> {
     val_ref: &'a mut T,
     saved_value: T,
 }
+
 
 #[allow(dead_code)]
 impl<'a, T: Copy> PushValue<'a, T> {
@@ -754,7 +801,6 @@ pub trait WidgetLayout {
             .position(|r| r.in_bounds(offset, &ctx.viewport))
     }
     fn draw_l(&self, widgets: &Vec<WidgetS>, offset: &Point, ctx: &mut WidgetDrawCtx) {
-        //self.draw_self(offset, ctx);
         for (w, r) in widgets.iter().zip(self.rects()) {
             let c_ctx = ctx.next_widget_ctx(false);
             if let Visibility::Visible = w.props.visible {
@@ -846,33 +892,27 @@ impl WidgetLayout for WidgetGrid {
     fn remeasure_items_l(&mut self, widgets: &mut Vec<WidgetS>, ctx: &DrawCtx) -> Point {
         let mut max_col_widths: Vec<f32> = vec![0.; self.n_cols];
         let mut row_heights: Vec<f32> = vec![0.; self.widget_rects.len() / self.n_cols];
-        let mut rows_v: Vec<(&mut Rect, &mut WidgetS)> = self
-            .widget_rects
-            .iter_mut()
-            .zip(widgets.iter_mut())
-            .collect();
-        let mut rows: Vec<&mut [(&mut Rect, &mut WidgetS)]> =
-            rows_v.chunks_mut(self.n_cols).collect();
-        for (r, row) in rows.iter_mut().enumerate() {
-            for (c, (rect, widget)) in row.iter_mut().enumerate() {
-                let m = widget.size_cache().unwrap_or(widget.remeasure(ctx));
-                **rect = Rect {
-                    c1: Point::origin(),
-                    c2: m,
-                };
-                max_col_widths[c] = max_col_widths[c].max(m.x);
-                row_heights[r] = row_heights[r].max(m.y);
-            }
+        let n_cols = self.n_cols;
+        for (i, (rect, widget)) in self.widget_rects.iter_mut().zip(widgets.iter_mut()).enumerate() {
+            let (r, c) = (i / n_cols, i % n_cols);
+            let m = widget.size_cache().unwrap_or(widget.remeasure(ctx));
+            *rect = Rect {
+                c1: Point::origin(),
+                c2: m,
+            };
+            max_col_widths[c] = max_col_widths[c].max(m.x);
+            row_heights[r] = row_heights[r].max(m.y);
         }
         let mut row_offset = 0.;
-        for (r, row) in rows.iter_mut().enumerate() {
+        for (i, rect) in self.widget_rects.iter_mut().enumerate() {
+            let (r, c) = (i / n_cols, i % n_cols);
             let mut col_offset = 0.;
-            for (c, (rect, _)) in row.iter_mut().enumerate() {
-                rect.set_offset(&Point::new(col_offset, row_offset));
-                col_offset += max_col_widths[c] + self.spacing.x;
+            rect.set_offset(&Point::new(col_offset, row_offset));
+            col_offset += max_col_widths[c] + self.spacing.x;
+            if i == n_cols - 1 {
+                row_offset += row_heights[r] + self.spacing.y;
+                self.size.x = self.size.x.max(col_offset);
             }
-            row_offset += row_heights[r] + self.spacing.y;
-            self.size.x = self.size.x.max(col_offset);
         }
         self.size.y = self.size.y.max(row_offset);
         self.size
@@ -908,7 +948,7 @@ impl WidgetBehavior for Button {
         _: &mut WidgetProps,
         ctx: &mut WidgetEventCtx,
     ) -> Option<EventResponse> {
-        *ctx.cursor = SystemCursor::Hand;
+        ctx.set_cursor(SystemCursor::Hand);
         Some(Handled)
     }
     fn draw_self(&self, offset: &Point, _: &WidgetProps, ctx: &mut WidgetDrawCtx) {
@@ -1075,7 +1115,7 @@ impl WidgetBehavior for DropDown {
             c.downcast_mut::<Label>().min_width = Some(max_width);
         }
     }
-    fn draw(&self, off: &Point, props: &WidgetProps, ctx: &mut WidgetDrawCtx) {
+    fn draw_self(&self, off: &Point, props: &WidgetProps, ctx: &mut WidgetDrawCtx) {
         self.draw_triangle(off, &props.children_size, ctx);
     }
     fn click(

@@ -136,26 +136,24 @@ impl AppState {
             cb(self);
         }
     }
-    /*pub fn new_widget_ctx<'a>(&'a self, use_cursor: &'a mut SystemCursor) -> WidgetEventCtx<'a> {
-        WidgetEventCtx {
-            draw_ctx: &self.draw_ctx,
-            cursor: use_cursor,
-            select_ctx: SelectCtx {
-                state: &self.select_state,
-                select_pos: 0
-            },
-            widget_idx: 0,
+    pub fn handle_result(&mut self, result: EventResult) {
+        if result.status & WidgetStatus::REMEASURE != WidgetStatus::FINE ||
+            self.interface.needs_measure()
+        {
+            self.interface.remeasure(&self.draw_ctx);
         }
-    }*/
+        if result.status & WidgetStatus::REDRAW != WidgetStatus::FINE {
+            self.needs_draw = true;
+        }
+        for cb in result.callbacks {
+            cb(self)
+        }
+        self.cursors.get(&result.cursor).set();
+    }
     pub fn handle_mouse_event(&mut self, ev: &Event, _: &Mod) {
-        let mut use_cursor = SystemCursor::Arrow;
-        /*let mut event_ctx = EventCtx {
-            draw_ctx: &self.draw_ctx,
-            cursor: &mut use_cursor,
-        };*/
         let mut widget_ctx =
-            WidgetEventCtx::new(&self.draw_ctx, &mut use_cursor, &self.select_state);
-        let _ = match *ev {
+            WidgetEventCtx::new(&self.draw_ctx, &self.select_state);
+        match *ev {
             Event::MouseButtonDown {
                 mouse_btn, x, y, ..
             } => {
@@ -164,41 +162,28 @@ impl AppState {
                         x: x as f32 - INTERFACE_OFFSET.0,
                         y: y as f32 - INTERFACE_OFFSET.1,
                     };
-                    self.interface.click(&pt, &mut widget_ctx)
-                //.or(self.select_state.set_select(None, &mut event_ctx))
-                } else {
-                    None
+                    if self.interface.click(&pt, &mut widget_ctx).is_none() {
+                        //self.select_state.set_select(None);
+                    }
                 }
             }
             Event::MouseButtonUp { mouse_btn, .. } => {
                 if mouse_btn == sdl2::mouse::MouseButton::Left {}
-                None
             }
             Event::MouseMotion { x, y, .. } => {
                 let pt = Point {
                     x: x as f32,
                     y: y as f32,
                 };
-                self.interface.hover(&pt, &mut widget_ctx)
+                self.interface.hover(&pt, &mut widget_ctx);
             }
-            _ => None,
+            _ => {},
         };
-        if self.interface.needs_measure() {
-            self.interface.remeasure(widget_ctx.draw_ctx);
-        }
-        for cb in widget_ctx.callbacks {
-            cb(self)
-        }
-        self.cursors.get(&use_cursor).set();
+        let res = widget_ctx.res;
+        self.handle_result(res);
     }
     pub fn handle_keyboard_event(&mut self, ev: &Event) {
-        let mut use_cursor = SystemCursor::Arrow;
-        let mut event_ctx = EventCtx {
-            draw_ctx: &self.draw_ctx,
-            cursor: &mut use_cursor,
-            callbacks: Vec::new(),
-            status: WidgetStatus::FINE,
-        };
+        let mut event_ctx = EventCtx::new(&self.draw_ctx);
         if let Event::KeyDown {
             keycode: Some(keycode),
             ..
@@ -213,18 +198,14 @@ impl AppState {
                 }
             }
         }
-        //self.handle_response(event_ctx.status, event_ctx.callbacks);
+        let res = event_ctx.res;
+        self.handle_result(res);
     }
     pub fn set_select(&mut self, select_idx: Option<usize>) {
-        let mut use_cursor = SystemCursor::Arrow;
-        let mut event_ctx = EventCtx {
-            draw_ctx: &self.draw_ctx,
-            cursor: &mut use_cursor,
-            callbacks: Vec::new(),
-            status: WidgetStatus::FINE,
-        };
+        let mut event_ctx = EventCtx::new(&self.draw_ctx);
         self.select_state.set_select(select_idx, &mut event_ctx);
-        //self.handle_response(event_ctx.status, event_ctx.callbacks);
+        let res = event_ctx.res;
+        self.handle_result(res);
     }
     pub fn render(&mut self) {
         if self.needs_draw {
@@ -343,20 +324,27 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetS {
 
 pub struct EventCtx<'a> {
     pub draw_ctx: &'a DrawCtx,
-    pub cursor: &'a mut SystemCursor,
-    pub callbacks: Vec<CallbackFn>,
-    pub status: WidgetStatus,
+    pub res: EventResult,
 }
 
 impl<'a> EventCtx<'a> {
+    fn new(draw_ctx: &'a DrawCtx) -> Self {
+        EventCtx {
+            draw_ctx,
+            res: EventResult::new()
+        }
+    }
     pub fn push_cb(&mut self, cb: CallbackFn) {
-        self.callbacks.push(cb);
+        self.res.callbacks.push(cb);
     }
     pub fn set_redraw(&mut self) {
-        self.status |= WidgetStatus::REDRAW;
+        self.res.status |= WidgetStatus::REDRAW;
     }
     pub fn set_remeasure(&mut self) {
-        self.status |= WidgetStatus::REMEASURE;
+        self.res.status |= WidgetStatus::REMEASURE;
+    }
+    pub fn set_cursor(&mut self, cursor: SystemCursor) {
+        self.res.cursor = cursor;
     }
 }
 

@@ -290,7 +290,7 @@ impl HandleKey for TextEdit {
 impl SelectionT for TextEdit {
     fn on_select(&mut self, ctx: &mut EventCtx) -> Option<EventResponse> {
         self.select_time = Some(SystemTime::now());
-        *ctx.cursor = SystemCursor::IBeam;
+        ctx.set_cursor(SystemCursor::IBeam);
         ctx.set_redraw();
         Some(Handled)
     }
@@ -384,7 +384,7 @@ impl WidgetBehavior for TextBox {
         _: &mut WidgetProps,
         ctx: &mut WidgetEventCtx,
     ) -> Option<EventResponse> {
-        *ctx.cursor = SystemCursor::IBeam;
+        ctx.set_cursor(SystemCursor::IBeam);
         Some(EventResponse::Handled)
     }
     fn selection(&self) -> Option<Box<dyn SelectionT>> {
@@ -402,7 +402,7 @@ impl WidgetBehavior for TextBox {
             .hover_text(off, &self.rect, &ctx.draw_ctx)
             .unwrap_or(0);
         println!("Cursor pos: {:?}", cursor_pos);
-        *ctx.cursor = SystemCursor::IBeam;
+        ctx.set_cursor(SystemCursor::IBeam);
         let idx = ctx.select_idx().unwrap();
         //Some(just_status(WidgetStatus::REDRAW))
         ctx.push_cb(Rc::new(move |app: &mut AppState| {
