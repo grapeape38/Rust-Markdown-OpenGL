@@ -418,10 +418,8 @@ impl<'a> WidgetDrawCtx<'a> {
             widget_idx: WidgetIdx(0),
         }
     }
-    fn next_widget_ctx(&mut self, is_leaf: bool) -> &mut Self {
-        if !is_leaf {
-            self.widget_idx.0 += 1;
-        }
+    fn next_widget_ctx(&mut self) -> &mut Self {
+        self.widget_idx.0 += 1;
         self
     }
     /*fn child_ctx(&mut self, w_idx: WidgetIdx, c_idx: usize) -> &mut Self {
@@ -474,10 +472,8 @@ impl<'a> WidgetEventCtx<'a> {
             res: EventResult::new()
         }
     }
-    fn child_ctx(&mut self, parent_idx: WidgetIdx, child_pos: usize, is_leaf: bool) -> &mut Self {
-        if !is_leaf {
-            self.widget_idx = self.select_state.child_widget_idx(parent_idx, child_pos);
-        }
+    fn child_ctx(&mut self, parent_idx: WidgetIdx, child_pos: usize) -> &mut Self {
+        self.widget_idx = self.select_state.child_widget_idx(parent_idx, child_pos);
         self
     }
     pub fn is_selected(&self) -> bool {
@@ -557,6 +553,7 @@ impl<'a, T: Copy> Drop for PushValue<'a, T> {
     }
 }
 
+#[derive(Debug)]
 pub enum Visibility {
     Visible,
     Invisible,
@@ -624,6 +621,7 @@ pub trait WidgetBehavior {
         props.children_size
     }
     fn draw(&self, off: &Point, props: &WidgetProps, ctx: &mut WidgetDrawCtx) {
+        //println!("Drawing widget: {:?}", ctx.widget_idx);
         self.draw_self(off, props, ctx);
         props.layout.draw_l(&props.children, off, ctx);
     }
@@ -711,12 +709,14 @@ impl WidgetS {
         self.handle_response(resp)
     }
     pub fn size_cache(&self) -> Option<Point> {
+        //println!("Size cache value: {:?}", self.props.size_cache);
         self.props.size_cache
     }
     pub fn needs_measure(&self) -> bool {
         self.props.size_cache.is_none()
     }
     pub fn remeasure(&mut self, ctx: &DrawCtx) -> Point {
+        //println!("Remeasuring!");
         self.bhv.remeasure_self_before(&mut self.props, ctx);
         self.props.children_size = self
             .props
@@ -724,6 +724,7 @@ impl WidgetS {
             .remeasure_items_l(&mut self.props.children, ctx);
         let size = self.bhv.remeasure_self_after(&self.props, ctx);
         self.props.size_cache = Some(size);
+        //println!("Size: {:?}", size);
         size
     }
     pub fn children(&self) -> &Vec<WidgetS> {
@@ -801,8 +802,9 @@ pub trait WidgetLayout {
             .position(|r| r.in_bounds(offset, &ctx.viewport))
     }
     fn draw_l(&self, widgets: &Vec<WidgetS>, offset: &Point, ctx: &mut WidgetDrawCtx) {
+        //println!("Drawing Layout {:?}", widgets.len());
         for (w, r) in widgets.iter().zip(self.rects()) {
-            let c_ctx = ctx.next_widget_ctx(false);
+            let c_ctx = ctx.next_widget_ctx();
             if let Visibility::Visible = w.props.visible {
                 w.draw(&(*offset + r.c1), c_ctx);
             }
@@ -820,7 +822,7 @@ pub trait WidgetLayout {
         for (c_idx, (w, r)) in widgets.iter_mut().zip(self.rects()).enumerate() {
             if r.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
                 //println!("Clicked in bounds! {:?} {:?}", w_idx, c_idx);
-                resp = w.click(&(*off_pt - r.c1), ctx.child_ctx(w_idx, c_idx, false));
+                resp = w.click(&(*off_pt - r.c1), ctx.child_ctx(w_idx, c_idx));
                 *status |= w.status();
                 break;
             }
@@ -838,7 +840,7 @@ pub trait WidgetLayout {
         let mut resp: Option<EventResponse> = None;
         for (c_idx, (w, r)) in widgets.iter_mut().zip(self.rects()).enumerate() {
             if r.in_bounds(off_pt, &ctx.draw_ctx.viewport) {
-                resp = w.hover(&(*off_pt - r.c1), ctx.child_ctx(w_idx, c_idx, false));
+                resp = w.hover(&(*off_pt - r.c1), ctx.child_ctx(w_idx, c_idx));
                 *status |= w.status();
                 break;
             }
@@ -851,7 +853,8 @@ impl WidgetLayout for WidgetList {
     fn remeasure_items_l(&mut self, widgets: &mut Vec<WidgetS>, ctx: &DrawCtx) -> Point {
         let mut off = Point::origin();
         let mut size = Point::origin();
-        let mut first = false;
+        let mut first = true;
+        self.widget_rects.resize(widgets.len(), Rect::empty());
         for (i, w) in widgets.iter_mut().enumerate() {
             if let Visibility::Collapsed = w.props.visible {
                 continue;
@@ -890,8 +893,9 @@ impl WidgetLayout for WidgetList {
 
 impl WidgetLayout for WidgetGrid {
     fn remeasure_items_l(&mut self, widgets: &mut Vec<WidgetS>, ctx: &DrawCtx) -> Point {
+        self.widget_rects.resize(widgets.len(), Rect::empty());
         let mut max_col_widths: Vec<f32> = vec![0.; self.n_cols];
-        let mut row_heights: Vec<f32> = vec![0.; self.widget_rects.len() / self.n_cols];
+        let mut row_heights: Vec<f32> = vec![0.; self.widget_rects.len() / self.n_cols + 1];
         let n_cols = self.n_cols;
         for (i, (rect, widget)) in self.widget_rects.iter_mut().zip(widgets.iter_mut()).enumerate() {
             let (r, c) = (i / n_cols, i % n_cols);
@@ -904,16 +908,18 @@ impl WidgetLayout for WidgetGrid {
             row_heights[r] = row_heights[r].max(m.y);
         }
         let mut row_offset = 0.;
+        let mut col_offset = 0.;
         for (i, rect) in self.widget_rects.iter_mut().enumerate() {
             let (r, c) = (i / n_cols, i % n_cols);
-            let mut col_offset = 0.;
             rect.set_offset(&Point::new(col_offset, row_offset));
             col_offset += max_col_widths[c] + self.spacing.x;
             if i == n_cols - 1 {
-                row_offset += row_heights[r] + self.spacing.y;
                 self.size.x = self.size.x.max(col_offset);
+                row_offset += row_heights[r] + self.spacing.y;
+                col_offset = 0.;
             }
         }
+        //println!("Widget rects: {:?}", self.widget_rects);
         self.size.y = self.size.y.max(row_offset);
         self.size
     }
@@ -1054,7 +1060,7 @@ impl WidgetBehavior for Label {
 
 pub struct DropDown {
     selected: usize,
-    hover_idx: usize,
+    hover_idx: Option<usize>,
     open: bool,
     n_items: usize,
 }
@@ -1077,28 +1083,16 @@ impl DropDown {
                 TextParams::new(),
             ));
         }
+        let layout = Box::new(WidgetList::new(Orientation::Vertical, 0));
         WidgetS {
             bhv: Box::new(DropDown {
                 selected,
-                hover_idx: 0,
+                hover_idx: None,
                 n_items: children.len(),
                 open: false,
             }),
-            props: WidgetProps::default(),
+            props: WidgetProps { children, layout, ..WidgetProps::default() }
         }
-    }
-    fn draw_triangle(&self, off: &Point, csize: &Point, ctx: &mut WidgetDrawCtx) {
-        let char_size = ctx.draw_ctx.render_text.char_size('a', 1.0);
-        let blue = glm::vec4(0., 0., 1., 1.);
-        let tri_center = Point::new(off.x + csize.x - char_size.x / 2., off.y + char_size.y / 2.);
-        ctx.draw_ctx.draw_iso_tri(
-            tri_center,
-            char_size.x,
-            char_size.y,
-            blue,
-            true,
-            Radians(std::f32::consts::PI),
-        );
     }
 }
 
@@ -1114,9 +1108,26 @@ impl WidgetBehavior for DropDown {
         for c in props.children.iter_mut() {
             c.downcast_mut::<Label>().min_width = Some(max_width);
         }
+        for (i, c) in props.children.iter_mut().enumerate() {
+            let vis = if self.open || i == self.selected { Visibility::Visible } 
+                else { Visibility::Collapsed };
+            c.set_visible(vis);
+        }
     }
-    fn draw_self(&self, off: &Point, props: &WidgetProps, ctx: &mut WidgetDrawCtx) {
-        self.draw_triangle(off, &props.children_size, ctx);
+    fn draw(&self, off: &Point, props: &WidgetProps, ctx: &mut WidgetDrawCtx) {
+        props.layout.draw_l(&props.children, off, ctx);
+        let char_size = ctx.draw_ctx.render_text.char_size('a', 1.0);
+        let blue = glm::vec4(0., 0., 1., 1.);
+        let tri_center = Point::new(off.x + props.children_size.x
+            - char_size.x / 2., off.y + char_size.y / 2.);
+        ctx.draw_ctx.draw_iso_tri(
+            tri_center,
+            char_size.x,
+            char_size.y,
+            blue,
+            true,
+            Radians(std::f32::consts::PI),
+        );
     }
     fn click(
         &mut self,
@@ -1126,14 +1137,11 @@ impl WidgetBehavior for DropDown {
     ) -> Option<EventResponse> {
         if self.open {
             self.selected = props.layout.get_idx(off, ctx.draw_ctx).unwrap_or(0);
-            for (i, c) in props.children.iter_mut().enumerate() {
-                if i != self.selected {
-                    c.set_visible(Visibility::Collapsed);
-                }
-            }
+            //println!("Selected! {:?}", self.selected);
         }
         self.open = !self.open;
-        props.set_remeasure();
+        ctx.res.status |= WidgetStatus::REMEASURE;
+        //props.set_remeasure();
         Some(Handled)
     }
     fn hover_self(
@@ -1144,15 +1152,22 @@ impl WidgetBehavior for DropDown {
     ) -> Option<EventResponse> {
         if self.open {
             if let Some(hover_idx) = props.layout.get_idx(off, ctx.draw_ctx) {
-                if let Some(widget) = props.children.get_mut(self.hover_idx) {
-                    widget.downcast_mut::<Label>().set_hover(false);
+                let mut change = true;
+                if let Some(prev_hover) = self.hover_idx {
+                    change = prev_hover != hover_idx;
+                    props.children[prev_hover]
+                        .downcast_mut::<Label>()
+                        .set_hover(false);
                 }
-                props.children[hover_idx]
-                    .downcast_mut::<Label>()
-                    .set_hover(true);
-                self.hover_idx = hover_idx;
+                if change {
+                    println!("Hover idx: {:?}", hover_idx);
+                    props.children[hover_idx]
+                        .downcast_mut::<Label>()
+                        .set_hover(true);
+                    self.hover_idx = Some(hover_idx);
+                    ctx.res.status |= WidgetStatus::REDRAW;
+                }
             }
-            props.set_redraw();
         }
         Some(Handled)
     }

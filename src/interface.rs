@@ -292,7 +292,7 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetS {
         new_label("Strategy:"),
         new_dropdown(vec!["Trend", "Mean Reversion"], 0),
     ];
-    form += vec![new_label("Volume:"), new_dropdown(vec!["Yes", "No"], 0)];
+    /*form += vec![new_label("Volume:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![new_label("Gap:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![new_label("Range:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![
@@ -309,7 +309,7 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetS {
             ],
     ];
     form += vec![new_label("Pattern:"), new_textbox("", 30)];
-    form += vec![new_label("Portfolio:"), new_dropdown(vec!["A", "B"], 0)];
+    form += vec![new_label("Portfolio:"), new_dropdown(vec!["A", "B"], 0)];*/
     let border = Border::new(Point::new(5., 5.), rgb_to_f32(0, 0, 0));
     let mut submit = new_button(
         border,
