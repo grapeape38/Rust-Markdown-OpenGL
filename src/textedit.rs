@@ -230,8 +230,8 @@ impl TextEdit {
         let rt = &draw_ctx.render_text;
         let line_height = rt.line_height(self.text_params.scale);
         if self.text_rope.len_chars() > 0 {
-            let mut max_lines = (rect.size.y / line_height) as usize;
-            max_lines = std::cmp::min(max_lines, self.text_rope.len_lines());
+            //let mut max_lines = (rect.size.y / line_height) as usize;
+            //max_lines = std::cmp::min(max_lines, self.text_rope.len_lines());
             /*let start_idx = if self.text_rope.len_lines() == 0 {
                 0
             } else {
@@ -295,6 +295,7 @@ impl SelectionT for TextEdit {
         Some(Handled)
     }
     fn on_deselect(&mut self, ctx: &mut EventCtx) -> Option<EventResponse> {
+        println!("Deselecting..");
         self.select_time = None;
         ctx.set_redraw();
         Some(Handled)
@@ -378,7 +379,7 @@ impl WidgetBehavior for TextBox {
         self.rect.size = size;
         size
     }
-    fn hover_self(
+    fn hover(
         &mut self,
         _: &Point,
         _: &mut WidgetProps,
@@ -390,10 +391,10 @@ impl WidgetBehavior for TextBox {
     fn selection(&self) -> Option<Box<dyn SelectionT>> {
         Some(Box::new(TextEdit::new(&self.default_text, self.rect.size)))
     }
-    fn click_self(
+    fn click(
         &mut self,
         off: &Point,
-        props: &mut WidgetProps,
+        _: &mut WidgetProps,
         ctx: &mut WidgetEventCtx,
     ) -> Option<EventResponse> {
         let cursor_pos = ctx
@@ -402,15 +403,19 @@ impl WidgetBehavior for TextBox {
             .hover_text(off, &self.rect, &ctx.draw_ctx)
             .unwrap_or(0);
         println!("Cursor pos: {:?}", cursor_pos);
-        ctx.set_cursor(SystemCursor::IBeam);
         let idx = ctx.select_idx().unwrap();
+        let is_select = ctx.is_selected();
         //Some(just_status(WidgetStatus::REDRAW))
         ctx.push_cb(Rc::new(move |app: &mut AppState| {
             let text_edit = app.select_state.get_select_mut::<TextEdit>(idx).unwrap();
             text_edit.set_cursor_pos(cursor_pos);
-            app.set_select(Some(idx));
+            if !is_select {
+                println!("Doing something suspicicous");
+                app.set_select(Some(idx));
+            }
         }));
-        props.set_redraw();
+        ctx.set_cursor(SystemCursor::IBeam);
+        ctx.res.status |= WidgetStatus::REDRAW;
         Some(EventResponse::Handled)
     }
 }

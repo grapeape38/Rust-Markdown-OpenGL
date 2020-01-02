@@ -69,7 +69,7 @@ fn main() {
                     app_state.handle_mouse_event(&ev, &kmod);
                 }
                 ev @ Event::KeyDown { .. } => {
-                    app_state.handle_keyboard_event(&ev);
+                    app_state.handle_keyboard_event(&ev, &kmod);
                 }
                 _ => {}
             }

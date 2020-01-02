@@ -70,6 +70,7 @@ bitflags! {
         const FINE = 0;
         const REDRAW = 1;
         const REMEASURE = 3;
+        const DESELECT = 4;
     }
 }
 
@@ -156,8 +157,6 @@ pub fn new_textbox(default_text: &str, num_chars: usize) -> WidgetS {
 #[derive(Debug)]
 pub struct DropDownSelect {
     selected: usize,
-    //is_focus: bool,
-    //open: bool,
     max_value: usize,
 }
 
@@ -171,18 +170,14 @@ impl DropDownSelect {
 }
 
 impl SelectionT for DropDownSelect {
-    fn on_select(&mut self, _: &mut EventCtx) -> Option<EventResponse> {
-        //self.is_focus = true;
+    fn on_select(&mut self, ctx: &mut EventCtx) -> Option<EventResponse> {
+        //println!("Selecting!");
+        ctx.set_redraw();
         None
     }
-    fn on_deselect(&mut self, _: &mut EventCtx) -> Option<EventResponse> {
-        //self.is_focus = false;
-        //if !self.open {
+    fn on_deselect(&mut self, ctx: &mut EventCtx) -> Option<EventResponse> {
+        ctx.set_redraw();
         None
-        //} else {
-        //   self.open = false;
-        //  Some(just_status(WidgetStatus::REMEASURE))
-        //}
     }
     fn handle_key_down(&mut self, kc: &Keycode, _: &mut EventCtx) -> Option<EventResponse> {
         match *kc {
@@ -291,7 +286,7 @@ impl SelectionList {
 
 pub struct SelectionState {
     list: SelectionList,
-    cur_select: Option<usize>,
+    pub cur_select: Option<usize>,
     child_sizes: ChildrenSizes,
 }
 
@@ -323,10 +318,17 @@ impl SelectionState {
         &mut self.list.vec[idx]
     }
     pub fn select_next(&mut self, ctx: &mut EventCtx) -> Option<EventResponse> {
-        if let Some(ref mut idx) = self.cur_select {
-            if *idx < self.list.vec.len() - 1 {
-                *idx += 1;
-                return self.on_select(ctx);
+        if let Some(idx) = self.cur_select {
+            if idx < self.list.vec.len() - 1 {
+                self.set_select(Some(idx + 1) , ctx);
+            }
+        }
+        None
+    }
+    pub fn select_prev(&mut self, ctx: &mut EventCtx) -> Option<EventResponse> {
+        if let Some(idx) = self.cur_select {
+            if idx > 0 {
+                self.set_select(Some(idx - 1) , ctx);
             }
         }
         None
@@ -345,7 +347,8 @@ impl SelectionState {
             .and_then(|s| s.downcast_mut::<T>())
     }
     pub fn is_select_w(&self, widx: WidgetIdx) -> bool {
-        self.list.widget_idx[widx.0] == self.cur_select
+        //println!("{:?} {:?} {:?}", widx, self.list.widget_idx, self.cur_select);
+        self.cur_select.is_some() && self.list.widget_idx[widx.0] == self.cur_select
     }
     pub fn select_idx(&self, widx: WidgetIdx) -> Option<usize> {
         self.list.widget_idx[widx.0]
@@ -373,8 +376,9 @@ impl SelectionState {
         }
     }
     pub fn print(&self) {
-        println!("{:?}", self.list.widget_idx);
-        println!("{:?}", self.child_sizes);
+        println!("Current select {:?}", self.cur_select);
+        println!("widget idx {:?}", self.list.widget_idx);
+        //println!("{:?}", self.child_sizes);
         for s in &self.list.vec {
             s.log();
         }
@@ -422,10 +426,6 @@ impl<'a> WidgetDrawCtx<'a> {
         self.widget_idx.0 += 1;
         self
     }
-    /*fn child_ctx(&mut self, w_idx: WidgetIdx, c_idx: usize) -> &mut Self {
-        self.widget_idx = self.select_state.child_widget_idx(w_idx, c_idx);
-        self
-    }*/
     pub fn is_selected(&self) -> bool {
         self.select_state.is_select_w(self.widget_idx)
     }
@@ -435,6 +435,10 @@ impl<'a> WidgetDrawCtx<'a> {
     pub fn get_select<T: SelectionT + 'static>(&'a self) -> Option<&'a T> {
         self.select_state.get_select_w(self.widget_idx)
     }
+    /*fn child_ctx(&mut self, w_idx: WidgetIdx, c_idx: usize) -> &mut Self {
+        self.widget_idx = self.select_state.child_widget_idx(w_idx, c_idx);
+        self
+    }*/
 }
 
 pub struct EventResult {
@@ -450,6 +454,9 @@ impl EventResult {
             callbacks: Vec::new(),
             status: WidgetStatus::FINE
         }
+    }
+    pub fn has_status(&self, status: WidgetStatus) -> bool {
+        self.status & status != WidgetStatus::FINE
     }
 }
 
@@ -490,6 +497,9 @@ impl<'a> WidgetEventCtx<'a> {
     }
     pub fn set_cursor(&mut self, cursor: SystemCursor) {
         self.res.cursor = cursor;
+    }
+    pub fn set_status(&mut self, status: WidgetStatus) {
+        self.res.status |= status;
     }
     /*fn next_widget_ctx(&mut self, is_leaf: bool) -> &mut Self {
         if !is_leaf {
@@ -564,6 +574,7 @@ pub struct WidgetProps {
     layout: Box<dyn WidgetLayout>,
     size_cache: Option<Point>,
     children_size: Point,
+    children_offset: Point,
     visible: Visibility,
     children: Vec<WidgetS>,
     status: WidgetStatus,
@@ -580,12 +591,14 @@ impl WidgetProps {
         self.status |= WidgetStatus::REDRAW
     }
 }
+
 impl Default for WidgetProps {
     fn default() -> Self {
         WidgetProps {
             layout: Box::new(WidgetList::new(Orientation::Vertical, 10)),
             size_cache: None,
             children_size: Point::origin(),
+            children_offset: Point::origin(),
             visible: Visibility::Visible,
             children: Vec::new(),
             status: WidgetStatus::FINE,
@@ -623,7 +636,7 @@ pub trait WidgetBehavior {
     fn draw(&self, off: &Point, props: &WidgetProps, ctx: &mut WidgetDrawCtx) {
         //println!("Drawing widget: {:?}", ctx.widget_idx);
         self.draw_self(off, props, ctx);
-        props.layout.draw_l(&props.children, off, ctx);
+        props.layout.draw_l(&props.children, &(*off + props.children_offset), ctx);
     }
     fn click(
         &mut self,
@@ -680,12 +693,7 @@ pub fn new_container<T: WidgetLayout + Sized + 'static>(w: T) -> WidgetS {
     WidgetS {
         bhv: Box::new(Container {}),
         props: WidgetProps {
-            layout: Box::new(w),
-            children: Vec::new(),
-            visible: Visibility::Visible,
-            size_cache: None,
-            children_size: Point::origin(),
-            status: WidgetStatus::FINE,
+            layout: Box::new(w), ..WidgetProps::default()
         },
     }
 }
@@ -797,13 +805,15 @@ impl std::ops::AddAssign<Vec<WidgetS>> for WidgetS {
 pub trait WidgetLayout {
     fn rects<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Rect> + 'a>;
     fn remeasure_items_l(&mut self, widgets: &mut Vec<WidgetS>, ctx: &DrawCtx) -> Point;
-    fn get_idx(&self, offset: &Point, ctx: &DrawCtx) -> Option<usize> {
+    fn get_idx(&self, off: &Point, ctx: &DrawCtx) -> Option<usize> {
         self.rects()
-            .position(|r| r.in_bounds(offset, &ctx.viewport))
+            .position(|r| r.in_bounds(off, &ctx.viewport))
     }
     fn draw_l(&self, widgets: &Vec<WidgetS>, offset: &Point, ctx: &mut WidgetDrawCtx) {
         //println!("Drawing Layout {:?}", widgets.len());
         for (w, r) in widgets.iter().zip(self.rects()) {
+            //ctx.draw_ctx.draw_rect(r.clone().set_offset(&(*offset + r.c1)).clone(), 
+                //   glm::vec4(0., 0., 0., 1.), false, Radians(0.));
             let c_ctx = ctx.next_widget_ctx();
             if let Visibility::Visible = w.props.visible {
                 w.draw(&(*offset + r.c1), c_ctx);
@@ -865,7 +875,8 @@ impl WidgetLayout for WidgetList {
                 first = false;
                 self.spacing as f32
             };
-            let m = w.size_cache().unwrap_or(w.remeasure(ctx));
+            //let m = w.size_cache().unwrap_or(w.remeasure(ctx));
+            let m = w.remeasure(ctx);
             match self.orientation {
                 Orientation::Vertical => {
                     off.y = size.y + spacing;
@@ -899,7 +910,8 @@ impl WidgetLayout for WidgetGrid {
         let n_cols = self.n_cols;
         for (i, (rect, widget)) in self.widget_rects.iter_mut().zip(widgets.iter_mut()).enumerate() {
             let (r, c) = (i / n_cols, i % n_cols);
-            let m = widget.size_cache().unwrap_or(widget.remeasure(ctx));
+            //let m = widget.size_cache().unwrap_or(widget.remeasure(ctx));
+            let m = widget.remeasure(ctx);
             *rect = Rect {
                 c1: Point::origin(),
                 c2: m,
@@ -913,13 +925,12 @@ impl WidgetLayout for WidgetGrid {
             let (r, c) = (i / n_cols, i % n_cols);
             rect.set_offset(&Point::new(col_offset, row_offset));
             col_offset += max_col_widths[c] + self.spacing.x;
-            if i == n_cols - 1 {
+            if c == n_cols - 1 {
                 self.size.x = self.size.x.max(col_offset);
                 row_offset += row_heights[r] + self.spacing.y;
                 col_offset = 0.;
             }
         }
-        //println!("Widget rects: {:?}", self.widget_rects);
         self.size.y = self.size.y.max(row_offset);
         self.size
     }
@@ -968,6 +979,9 @@ impl WidgetBehavior for Button {
     ) -> Option<EventResponse> {
         ctx.push_cb(Rc::clone(&self.onclick));
         Some(Handled)
+    }
+    fn remeasure_self_before(&mut self, props: &mut WidgetProps, _: &DrawCtx) {
+        props.children_offset = self.border_rect.border.width;
     }
     fn remeasure_self_after(&mut self, props: &WidgetProps, _: &DrawCtx) -> Point {
         self.border_rect.size = props.children_size;
@@ -1115,7 +1129,12 @@ impl WidgetBehavior for DropDown {
         }
     }
     fn draw(&self, off: &Point, props: &WidgetProps, ctx: &mut WidgetDrawCtx) {
+        let is_select = ctx.is_selected();
         props.layout.draw_l(&props.children, off, ctx);
+        if is_select {
+            let r = Rect { c1: *off, c2: *off + props.size_cache.unwrap() };
+            ctx.draw_ctx.draw_rect(r, glm::vec4(0., 0., 1., 1.), false, Radians(0.));
+        }
         let char_size = ctx.draw_ctx.render_text.char_size('a', 1.0);
         let blue = glm::vec4(0., 0., 1., 1.);
         let tri_center = Point::new(off.x + props.children_size.x
@@ -1136,7 +1155,10 @@ impl WidgetBehavior for DropDown {
         ctx: &mut WidgetEventCtx,
     ) -> Option<EventResponse> {
         if self.open {
-            self.selected = props.layout.get_idx(off, ctx.draw_ctx).unwrap_or(0);
+            if let Some(selected) = props.layout.get_idx(off, ctx.draw_ctx) {
+                println!("Clicked {:?}", selected);
+                self.selected = selected;
+            }
             //println!("Selected! {:?}", self.selected);
         }
         self.open = !self.open;
@@ -1144,7 +1166,7 @@ impl WidgetBehavior for DropDown {
         //props.set_remeasure();
         Some(Handled)
     }
-    fn hover_self(
+    fn hover(
         &mut self,
         off: &Point,
         props: &mut WidgetProps,
@@ -1160,7 +1182,7 @@ impl WidgetBehavior for DropDown {
                         .set_hover(false);
                 }
                 if change {
-                    println!("Hover idx: {:?}", hover_idx);
+                    //println!("Hover idx: {:?}", hover_idx);
                     props.children[hover_idx]
                         .downcast_mut::<Label>()
                         .set_hover(true);

@@ -115,7 +115,6 @@ impl AppState {
         let draw_ctx = DrawCtx::new(viewport);
         let interface = new_form(&draw_ctx);
         let select_state = SelectionState::new(&interface);
-        select_state.print();
         AppState {
             draw_ctx,
             interface,
@@ -125,24 +124,16 @@ impl AppState {
             needs_draw: true,
         }
     }
-    pub fn handle_response(&mut self, status: WidgetStatus, callbacks: Vec<CallbackFn>) {
-        if status & (WidgetStatus::REDRAW) != WidgetStatus::FINE {
-            self.needs_draw = true;
-        }
-        if status & (WidgetStatus::REDRAW) != WidgetStatus::FINE {
-            self.interface.remeasure(&self.draw_ctx);
-        }
-        for cb in callbacks {
-            cb(self);
-        }
-    }
     pub fn handle_result(&mut self, result: EventResult) {
-        if result.status & WidgetStatus::REMEASURE != WidgetStatus::FINE ||
+        if result.has_status(WidgetStatus::DESELECT) {
+            self.set_select(None);
+        }
+        if result.has_status(WidgetStatus::REMEASURE) ||
             self.interface.needs_measure()
         {
             self.interface.remeasure(&self.draw_ctx);
         }
-        if result.status & WidgetStatus::REDRAW != WidgetStatus::FINE {
+        if result.has_status(WidgetStatus::REDRAW) {
             self.needs_draw = true;
         }
         for cb in result.callbacks {
@@ -163,7 +154,8 @@ impl AppState {
                         y: y as f32 - INTERFACE_OFFSET.1,
                     };
                     if self.interface.click(&pt, &mut widget_ctx).is_none() {
-                        //self.select_state.set_select(None);
+                        println!("None for some reason");
+                        widget_ctx.set_status(WidgetStatus::DESELECT);
                     }
                 }
             }
@@ -172,8 +164,8 @@ impl AppState {
             }
             Event::MouseMotion { x, y, .. } => {
                 let pt = Point {
-                    x: x as f32,
-                    y: y as f32,
+                    x: x as f32 - INTERFACE_OFFSET.0,
+                    y: y as f32 - INTERFACE_OFFSET.1,
                 };
                 self.interface.hover(&pt, &mut widget_ctx);
             }
@@ -182,7 +174,7 @@ impl AppState {
         let res = widget_ctx.res;
         self.handle_result(res);
     }
-    pub fn handle_keyboard_event(&mut self, ev: &Event) {
+    pub fn handle_keyboard_event(&mut self, ev: &Event, kmod: &Mod) {
         let mut event_ctx = EventCtx::new(&self.draw_ctx);
         if let Event::KeyDown {
             keycode: Some(keycode),
@@ -193,7 +185,13 @@ impl AppState {
                 let resp = self.select_state.handle_key_down(&keycode, &mut event_ctx);
                 if resp.is_none() {
                     if let Keycode::Tab = keycode {
-                        self.select_state.select_next(&mut event_ctx);
+                        if let Mod::LSHIFTMOD = *kmod {
+                            self.select_state.select_prev(&mut event_ctx);
+                        } else {
+                            self.select_state.select_next(&mut event_ctx);
+                        }
+                        //println!("Result: {:?}", event_ctx.res.status);
+                        //self.select_state.print();
                     }
                 }
             }
@@ -292,7 +290,7 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetS {
         new_label("Strategy:"),
         new_dropdown(vec!["Trend", "Mean Reversion"], 0),
     ];
-    /*form += vec![new_label("Volume:"), new_dropdown(vec!["Yes", "No"], 0)];
+    form += vec![new_label("Volume:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![new_label("Gap:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![new_label("Range:"), new_dropdown(vec!["Yes", "No"], 0)];
     form += vec![
@@ -309,7 +307,7 @@ pub fn new_form(ctx: &DrawCtx) -> WidgetS {
             ],
     ];
     form += vec![new_label("Pattern:"), new_textbox("", 30)];
-    form += vec![new_label("Portfolio:"), new_dropdown(vec!["A", "B"], 0)];*/
+    form += vec![new_label("Portfolio:"), new_dropdown(vec!["A", "B"], 0)];
     let border = Border::new(Point::new(5., 5.), rgb_to_f32(0, 0, 0));
     let mut submit = new_button(
         border,
